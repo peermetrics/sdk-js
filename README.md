@@ -75,6 +75,11 @@ let peerMetrics = new PeerMetrics({
 ```
 
 ### API
+
+#### `.initialize()`
+
+Used to initialize the SDK. Returns a promise that rejects if any problems were encountered (for example invalid apiKey, over quota, etc)
+
 #### `.addPeer(options)`
 Adds a peer to the watch list.
 `options`
@@ -86,6 +91,22 @@ Monitoring of a peer will automatically end when the connection is closed.
 #### `.removePeer(peerId)`
 
 Stop listening for events/stats for this peer
+
+#### `.addEvent(object)`
+
+Add a custom event for this participant. eg: `{eventName: 'open settings', description: 'user opened settings dialog'}`.
+
+`object` doesn't require a specific structure, but if the `eventName` attribute is present, it will be used as a event title on the timeline.
+
+This helps you get a better context of the actions the user took that might have impacted the WebRTC experience.
+
+#### `.mute()`/`.unmute()`
+
+Save event that user muted/unmuted the microphone
+
+### Browser support
+
+Right now, the sdk has been tested and is compatible with the latest version of Chromium based browsers (Chrome, Edge, Brave, etc), Firefox and Safari.
 
 ## License
 MIT
