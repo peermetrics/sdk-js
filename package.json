@@ -1,10 +1,10 @@
 {
   "name": "@peermetrics/sdk",
   "version": "0.1.0",
-  "description": "",
+  "description": "The peer metrics javascript SDK",
   "main": "dist/index.js",
   "browser": "dist/browser.js",
-  "repository": "",
+  "repository": "https://github.com/peermetrics/sdk-js",
   "author": "Andrei Onel <andrei@peermetrics.io>",
   "license": "MIT",
   "scripts": {
