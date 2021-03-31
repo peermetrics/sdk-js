@@ -1,0 +1,12 @@
+{
+  "presets": [
+    "minify",
+    ["@babel/env", {
+      "targets": "defaults"
+    }],
+    "@babel/typescript"
+  ],
+  "plugins": [
+    ["@babel/transform-runtime"]
+  ]
+}
