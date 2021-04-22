@@ -287,6 +287,9 @@ export class ApiWrapper {
 
     // if we have a timestamps than this event happened in the past
     // add the delta attribute so the backend knows
+    // we might get the timestamp attribute inside data
+    // this happens for events that we manually delay sending
+    timestamp = timestamp || data.timestamp
     if (timestamp) {
       data.delta = Date.now() - timestamp
     } else {
