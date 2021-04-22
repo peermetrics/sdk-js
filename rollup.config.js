@@ -15,18 +15,14 @@ const plugins = [
   commonJS({
     include: 'node_modules/**'
   }),
-  typescript(),
-  babel({
-    ...babelConfig,
-    babelHelpers: 'runtime'
-  })
+  typescript()
 ]
 
 export default [{
   input: 'src/index.js',
   output: [
     {
-      file: pkg.browser,
+      file: 'dist/browser.js',
       name: 'window',
       format: 'iife',
       extend: true
@@ -36,7 +32,13 @@ export default [{
       format: 'iife',
       name: 'window',
       extend: true,
-      plugins: [terser()]
+      plugins: [
+        babel({
+          ...babelConfig,
+          babelHelpers: 'runtime'
+        }),
+        terser()
+      ]
     },
     {
       file: pkg.main,

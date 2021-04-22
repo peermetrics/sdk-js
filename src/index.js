@@ -41,6 +41,8 @@ const CONSTRAINTS = {
  */
 let peersToMonitor = {}
 
+let eventQueue = []
+
 export class PeerMetrics {
   /**
    * Used to initialize the SDK
@@ -249,19 +251,27 @@ export class PeerMetrics {
     log('addPeer', options)
 
     try {
-      // first make the request to add the peer to DB
+      // add the peer to webrtcStats now, so we don't miss any events
+      this.webrtcStats.addPeer(options)
+
+      // make the request to add the peer to DB
       const response = await this.apiWrapper.sendConnectionEvent({
         eventName: 'addPeer',
         peerId: options.peerId,
         peerName: options.peerName
       })
 
-      // we'll receive a new peer id, use that for tracking
+      // we'll receive a new peer id, use peersToMonitor make a connection between them
       let oldPeerId = options.peerId
-      options.peerId = response.peer_id
-      this.webrtcStats.addPeer(options)
-
       peersToMonitor[oldPeerId] = response.peer_id
+
+      // all the events that we captured while waiting for 'addPeer' are here
+      // send them to the server
+      eventQueue.map((event) => {
+        this.handleTimelineEvent(event)
+      })
+      // clear the queue
+      eventQueue.length = 0
     } catch (e) {
       console.error(e)
       throw e
@@ -408,22 +418,36 @@ export class PeerMetrics {
   _addWebrtcStatsEventListeners () {
     this.webrtcStats
       // just listen on the timeline and handle them differently
-      .on('timeline', (ev) => {
-        switch (ev.tag) {
-          case 'getUserMedia':
-            this._handleGumEvent(ev)
-            break
-          case 'stats':
-            this._handleStatsEvent(ev)
-            break
-          case 'track':
-            log(ev)
-            break
-          default:
-            this._handleConnectionEvent(ev)
-            break
-        }
-      })
+      .on('timeline', this.handleTimelineEvent.bind(this))
+  }
+
+  handleTimelineEvent (ev) {
+    if (ev.peerId) {
+      if (peersToMonitor[ev.peerId]) {
+        // update with the new peer
+        ev.peerId = peersToMonitor[ev.peerId]
+      } else {
+        // add this special flag to signal that we've manually delayed sending this request
+        ev.delayed = true
+        eventQueue.push(ev)
+        return
+      }
+    }
+
+    switch (ev.tag) {
+      case 'getUserMedia':
+        this._handleGumEvent(ev)
+        break
+      case 'stats':
+        this._handleStatsEvent(ev)
+        break
+      case 'track':
+        log(ev)
+        break
+      default:
+        this._handleConnectionEvent(ev)
+        break
+    }
   }
 
   // Handle different types of events
@@ -484,7 +508,7 @@ export class PeerMetrics {
   }
 
   async _handleConnectionEvent (ev) {
-    let {event, peerId, data} = ev
+    let {event, peerId, data, delayed} = ev
     let eventData = data
 
     switch (event) {
@@ -527,9 +551,11 @@ export class PeerMetrics {
     }
 
     try {
+      const timestamp = delayed ? ev.timestamp : null
       await this.apiWrapper.sendConnectionEvent({
-        eventName: event,
         peerId,
+        timestamp,
+        eventName: event,
         data: eventData
       })
     } catch (e) {
