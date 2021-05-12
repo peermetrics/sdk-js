@@ -14,6 +14,7 @@ const DEFAULT_OPTIONS = {
   apiRoot: 'https://api.peermetrics.io/v1',
   debug: false,
   mockRequests: false,
+  remote: true,
   getStatsInterval: 5000
 }
 
