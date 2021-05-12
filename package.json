@@ -19,7 +19,7 @@
   },
   "keywords": [],
   "dependencies": {
-    "@peermetrics/webrtc-stats": "^3.1.0",
+    "@peermetrics/webrtc-stats": "^4.0.0",
     "ua-parser-js": "^0.7.24",
     "wretch": "^1.7.4"
   },

@@ -18,6 +18,13 @@ const REQUEST_TIMEOUT = 10 * 1000
 const EXPONENTIAL_BACKOFF = 500
 const MAX_EXPONENTIAL_BACKOFF = 60 * 1000
 
+const UNRECOVERABLE_ERRORS = [
+  'domain_not_allowed',
+  'quota_exceeded',
+  'invalid_api_key',
+  'app_not_recording'
+]
+
 /**
  * An object to map endpoint names to URLs
  * @type {Object}
@@ -40,6 +47,8 @@ export class ApiWrapper {
 
     // debug options
     this.mockRequests = options.mockRequests
+
+    this.unrecoverable = UNRECOVERABLE_ERRORS
 
     /**
      * If we should batch connections events
@@ -261,7 +270,7 @@ export class ApiWrapper {
     }
   }
 
-  makeRequest (options) {
+  async makeRequest (options) {
     // we just need the path, the base url is set at initialization
     let {path, timestamp, data = {}} = options
 
@@ -300,7 +309,7 @@ export class ApiWrapper {
     try {
       data = JSON.stringify(data)
     } catch (e) {
-      return Promise.reject(new Error('Could not stringify request data'))
+      throw new Error('Could not stringify request data')
     }
 
     // keep the content type as text plain to avoid CORS preflight requests
@@ -320,23 +329,30 @@ export class ApiWrapper {
       })
   }
 
-  handleResponse (response) {
+  async handleResponse (response) {
     if (response) {
       log(response)
     }
 
-    return Promise.resolve(response)
+    return response
   }
 
   /**
    * Used to handle a failed fetch request
    * @param  {Object} arg
    */
-  handleFailedRequest (arg) {
+  async handleFailedRequest (arg) {
     let {response, timestamp, options} = arg
     let {backoff = EXPONENTIAL_BACKOFF} = options
+    let body
 
-    console.warn(response, response.status)
+    try {
+      body = JSON.parse(response.message)
+      // we have a domain restriction, app paused, invalid api key or over quota, no need for retry
+      if (this.unrecoverable.includes(body.error_code)) {
+        return Promise.reject(body)
+      }
+    } catch (e) {}
 
     // if we got an error, then the user is offline or a timeout
     if (response instanceof Error || response.status > 500) {
@@ -345,7 +361,7 @@ export class ApiWrapper {
 
       // don't go over 1 min
       if (backoff > MAX_EXPONENTIAL_BACKOFF) {
-        return Promise.reject(new Error('request failed after exponential backoff'))
+        throw new Error('request failed after exponential backoff')
       }
 
       return new Promise((resolve, reject) => {
@@ -357,12 +373,7 @@ export class ApiWrapper {
       })
     }
 
-    let responseObject = {}
-    try {
-      responseObject = JSON.parse(response.text)
-    } catch (e) {}
-
-    return Promise.reject(responseObject)
+    return Promise.reject(body)
   }
 
   _createUrl (path = '/') {
