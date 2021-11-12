@@ -1,3 +1,5 @@
+import path from 'path'
+
 import typescript from '@rollup/plugin-typescript'
 import babel from '@rollup/plugin-babel'
 import resolve from '@rollup/plugin-node-resolve'
@@ -5,6 +7,7 @@ import commonJS from '@rollup/plugin-commonjs'
 
 import nodePolyfills from 'rollup-plugin-node-polyfills'
 import { terser } from 'rollup-plugin-terser'
+import license from 'rollup-plugin-license'
 
 import pkg from './package.json'
 import babelConfig from './.babelrc.json'
@@ -15,7 +18,15 @@ const plugins = [
   commonJS({
     include: 'node_modules/**'
   }),
-  typescript()
+  typescript(),
+  license({
+    banner: {
+      commentStyle: 'regular',
+      content: {
+        file: path.join(__dirname, 'LICENSE')
+      }
+    }
+  })
 ]
 
 export default [{
