@@ -3,20 +3,28 @@ import {WebRTCStats} from '@peermetrics/webrtc-stats'
 import {User} from './user'
 import {ApiWrapper} from './api-wrapper'
 
-import {enableDebug, log} from './utils'
+import {enableDebug, log, PeerMetricsError} from './utils'
+
+import type {
+  PeerMetricsConstructor,
+  AddPeerOptions,
+  SessionData,
+  PageEvents,
+  DefaultOptions,
+  AddEventOptions
+} from './types/index'
 
 const DEFAULT_OPTIONS = {
   pageEvents: {
-    refresh: true,
     pageVisibility: false,
-    fullScreen: false
+    // fullScreen: false
   },
   apiRoot: 'https://api.peermetrics.io/v1',
   debug: false,
   mockRequests: false,
   remote: true,
   getStatsInterval: 5000
-}
+} as DefaultOptions
 
 const CONSTRAINTS = {
   meta: {
@@ -45,11 +53,19 @@ let peersToMonitor = {}
 let eventQueue = []
 
 export class PeerMetrics {
+
+  private user: User
+  private apiWrapper: ApiWrapper
+  private webrtcStats: WebRTCStats
+  private pageEvents: PageEvents
+  private _options: PeerMetricsConstructor
+  private _initialized: boolean = false
+
   /**
    * Used to initialize the SDK
    * @param  {Object} options
    */
-  constructor (options = {}) {
+  constructor (options: PeerMetricsConstructor) {
     // check if options are valid
     if (typeof options !== 'object') {
       throw new Error('Invalid argument. Expected object, got something else.')
@@ -149,8 +165,6 @@ export class PeerMetrics {
      */
     this._options = options
 
-    this._initialized = false
-
     this.pageEvents = options.pageEvents
 
     enableDebug(!!options.debug)
@@ -176,7 +190,7 @@ export class PeerMetrics {
         conferenceName: this._options.conferenceName
       })
     } catch (responseError) {
-      const error = new Error(responseError.message)
+      const error = new PeerMetricsError(responseError.message)
       // if the api key is not valid
       // or the quota is exceded
       if (responseError.error_code) {
@@ -192,7 +206,7 @@ export class PeerMetrics {
     // gather platform info about the user's device. OS, browser, etc
     // we need to do them after gUM is called to get the correct labels for devices
     // when we get all of them send them over
-    let sessionData = await this.user.getUserDetails()
+    let sessionData = await this.user.getUserDetails() as SessionData
 
     // add app version and meta if present
     sessionData.appVersion = this._options.appVersion
@@ -220,13 +234,17 @@ export class PeerMetrics {
    * Used to start monitoring for a peer
    * @param {Object} options Options for this peer
    */
-  async addPeer (options = {}) {
+  async addPeer (options: AddPeerOptions) {
     if (!this._initialized) {
       throw new Error('SDK not initialized. Please call initialize() first.')
     }
 
     if (!this.webrtcStats) {
       throw new Error('The stats module is not instantiated yet.')
+    }
+
+    if (typeof options !== 'object') {
+      throw new Error('Argument for addPeer() should be an object.')
     }
 
     if (!options.pc) {
@@ -269,17 +287,25 @@ export class PeerMetrics {
       // all the events that we captured while waiting for 'addPeer' are here
       // send them to the server
       eventQueue.map((event) => {
-        this.handleTimelineEvent(event)
+        this._handleTimelineEvent(event)
       })
       // clear the queue
       eventQueue.length = 0
     } catch (e) {
-      console.error(e)
+      log(e)
       throw e
     }
   }
 
-  async removePeer (peerId) {
+  /**
+   * Stop listening for events for a specific peer
+   * @param {string} peerId The peer ID to stop listening to
+   */
+  async removePeer (peerId: string) {
+    if (typeof peerId !== 'string') {
+      throw new Error('Argument for removePeer() should be a string.')
+    }
+
     if (!peersToMonitor[peerId]) {
       throw new Error(`Could not find peer with id ${peerId}`)
     }
@@ -287,19 +313,61 @@ export class PeerMetrics {
     this.webrtcStats.removePeer(peerId)
   }
 
-  addPageEventListeners (options = {}) {
+  /**
+   * Add a custom event for this user
+   * @param {Object} options The details for this event
+   */
+  async addEvent (options: AddEventOptions) {
+    if (typeof options !== 'object') {
+      throw new Error('Parameter for addEvent() should be an object.')
+    }
+
+    if (options.eventName && options.eventName.length > CONSTRAINTS.customEvent.eventNameLength) {
+      throw new Error(`eventName should be shorter than ${CONSTRAINTS.customEvent.eventNameLength}.`)
+    }
+
+    try {
+      let json = JSON.stringify(options)
+      if (json.length > CONSTRAINTS.customEvent.bodyLength) {
+        throw new Error('Custom event body size limit reached.')
+      }
+    } catch (e) {
+      throw new Error('Custom event is not serializable.')
+    }
+    this.apiWrapper.sendCustomEvent(options)
+  }
+
+  /**
+   * Called when the current user has muted the mic
+   */
+  async mute () {
+    this.apiWrapper.sendCustomEvent({eventName: 'mute'})
+  }
+
+  /**
+   * Called when the current user has unmuted the mic
+   */
+  async unmute () {
+    this.apiWrapper.sendCustomEvent({eventName: 'unmute'})
+  }
+
+  private addPageEventListeners (options: PageEvents) {
     window.addEventListener('unload', () => {
       this.apiWrapper.sendLeaveEvent('unload')
     }, false)
 
-    // full screen
-    // options.fullScreen && this.addFullScreenEventListeners()
-
     // tab focus/unfocus
-    options.pageVisibility && this.addPageVisibilityListeners()
+    if (options.pageVisibility && window.document) {
+      this.addPageVisibilityListeners(window.document)
+    }
+
+    // track full screen
+    // if (options.fullScreen) {
+    //  this.addFullScreenEventListeners()
+    // }
   }
 
-  addPageVisibilityListeners () {
+  private addPageVisibilityListeners (document: Document & {msHidden?: boolean; webkitHidden?: boolean}) {
     // Set the name of the hidden property and the change event for visibility
     let hidden, visibilityChange
 
@@ -333,29 +401,22 @@ export class PeerMetrics {
    * Add event listeners for fullScreen events
    * from: https://gist.github.com/samccone/1653975
    */
-  addFullScreenEventListeners () {
+  private addFullScreenEventListeners () {
     // TODO: add full screen events
 
-    let isSupported = document.body.mozRequestFullScreen || document.body.webkitRequestFullScreen || document.body.requestFullScreen
-
-    if (!isSupported) return
-
-    let fullScreenEvent = (ev) => {
+    if (document.body.requestFullscreen) {
+     window.addEventListener('fullscreenchange', (ev) => {
       log(ev)
-    }
-    (document.body.requestFullScreen && window.addEventListener('fullscreenchange', fullScreenEvent)) ||
-    (document.body.webkitRequestFullScreen && window.addEventListener('webkitfullscreenchange', fullScreenEvent)) ||
-    (document.body.mozRequestFullScreen && window.addEventListener('mozfullscreenchange', fullScreenEvent))
 
-    // document.addEventListener('fullscreenchange', (ev) => {
-    //   this.apiWrapper.sendPageEvent({
-    //     eventName: 'fullScreen',
-    //     fullScreen: true
-    //   })
-    // })
+      // this.apiWrapper.sendPageEvent({
+      //   eventName: 'fullScreen',
+      //   fullScreen: true
+      // })
+    })
+   }
   }
 
-  addMediaDeviceChangeListener () {
+  private addMediaDeviceChangeListener () {
     navigator.mediaDevices.addEventListener('devicechange', () => {
       // first get the new devices
       return this.user.getDevices()
@@ -367,38 +428,7 @@ export class PeerMetrics {
     })
   }
 
-  /**
-   * Add a custom event for this user
-   * @param {Object} options The details for this event
-   */
-  async addEvent (options = {}) {
-    if (options.eventName && options.eventName.length > CONSTRAINTS.customEvent.eventNameLength) {
-      throw new Error(`eventName should be shorter than ${CONSTRAINTS.customEvent.eventNameLength}.`)
-    }
-
-    try {
-      let json = JSON.stringify(options)
-      if (json.length > CONSTRAINTS.customEvent.bodyLength) {
-        throw new Error('Custom event body size limit reached.')
-      }
-    } catch (e) {
-      throw new Error('Custom event is not serializable.')
-    }
-    this.apiWrapper.sendCustomEvent(options)
-  }
-
-  /**
-   * Called when the current user has muted the mic
-   */
-  async mute () {
-    this.apiWrapper.sendCustomEvent({eventName: 'mute'})
-  }
-
-  async unmute () {
-    this.apiWrapper.sendCustomEvent({eventName: 'unmute'})
-  }
-
-  _initializeStatsModule (getStatsInterval = DEFAULT_OPTIONS.getStatsInterval) {
+  private _initializeStatsModule (getStatsInterval = DEFAULT_OPTIONS.getStatsInterval) {
     // initialize the webrtc stats module
     this.webrtcStats = new WebRTCStats({
       getStatsInterval: getStatsInterval,
@@ -416,13 +446,13 @@ export class PeerMetrics {
   /**
    * Adds event listener for the stats library
    */
-  _addWebrtcStatsEventListeners () {
+  private _addWebrtcStatsEventListeners () {
     this.webrtcStats
       // just listen on the timeline and handle them differently
-      .on('timeline', this.handleTimelineEvent.bind(this))
+      .on('timeline', this._handleTimelineEvent.bind(this))
   }
 
-  handleTimelineEvent (ev) {
+  private _handleTimelineEvent (ev) {
     if (ev.peerId) {
       if (peersToMonitor[ev.peerId]) {
         // update with the new peer
@@ -453,7 +483,7 @@ export class PeerMetrics {
 
   // Handle different types of events
   // TODO: move this somewhere else
-  _handleGumEvent (ev) {
+  private _handleGumEvent (ev) {
     /**
      * The data for this event
      * Can have one of 3 arguments
@@ -469,7 +499,7 @@ export class PeerMetrics {
      * after we parse data
      * @type {Object}
      */
-    let dataToSend = {}
+    let dataToSend: any = {}
     if (data.constraints) {
       dataToSend.constraints = data.constraints
     }
@@ -502,13 +532,13 @@ export class PeerMetrics {
     this.apiWrapper.saveGetUserMediaEvent(dataToSend)
   }
 
-  _handleStatsEvent (ev) {
+  private _handleStatsEvent (ev) {
     let {data, peerId} = ev
 
     this.apiWrapper.sendWebrtcStats({data, peerId})
   }
 
-  async _handleConnectionEvent (ev) {
+  private async _handleConnectionEvent (ev) {
     let {event, peerId, data, delayed} = ev
     let eventData = data
 
@@ -554,9 +584,9 @@ export class PeerMetrics {
     try {
       const timestamp = delayed ? ev.timestamp : null
       await this.apiWrapper.sendConnectionEvent({
+        eventName: event,
         peerId,
         timestamp,
-        eventName: event,
         data: eventData
       })
     } catch (e) {
