@@ -5,6 +5,13 @@ import UAParse from 'ua-parser-js'
  * We gather the info for the current user here
  */
 export class User {
+  public userId: string
+  public userName: string
+  public deviceInfo: object
+  public platform: object = {}
+  public constraints: MediaTrackSupportedConstraints = {}
+  public devices: object[] = []
+
   constructor (options) {
     if (!options.userId) {
       throw new Error('missing argument userId')
@@ -12,10 +19,6 @@ export class User {
 
     this.userId = options.userId
     this.userName = options.userName
-
-    this.platform = {}
-    this.constraints = {}
-    this.devices = []
   }
 
   /**
@@ -58,11 +61,13 @@ export class User {
   }
 
   async getDeviceInfo () {
+    // @ts-ignore
+    let getBattery: any = navigator.getBattery
     let battery
 
-    if (navigator.getBattery) {
+    if (getBattery) {
       try {
-        battery = await navigator.getBattery()
+        battery = await getBattery()
         battery = {
           charging: battery.charging,
           chargingTime: battery.chargingTime,
@@ -77,6 +82,7 @@ export class User {
     return {
       battery: battery,
       cores: navigator.hardwareConcurrency,
+      // @ts-ignore
       memory: window.performance.memory || {},
       timing: window.performance.timing || {},
       navigation: window.performance.navigation || {}

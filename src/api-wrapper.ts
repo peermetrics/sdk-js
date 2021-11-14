@@ -1,9 +1,12 @@
+import wretch from 'wretch'
 
 import {log} from './utils'
 
-import wretch from 'wretch'
+import type {User} from './user'
+import type {ApiInitializeData, MakeRequest, ConnectionEventData} from './types'
+import type {Wretcher, ResponseChain} from 'wretch'
 
-let externalApi = {}
+let externalApi: Wretcher
 
 let token = ''
 let start = 0
@@ -39,6 +42,19 @@ let urlsMap = {
 }
 
 export class ApiWrapper {
+  private apiKey: string
+  private apiRoot: string
+  private user: User
+  private mockRequests: boolean
+  private unrecoverable: string[] = UNRECOVERABLE_ERRORS
+  /**
+   * If we should batch connections events
+   * defaults to false and we'll let the server tell us if we should
+   */
+  private batchConnectionEvents: boolean = DEFAULT_OPTIONS.batchConnectionEvents
+  private connectionEvents: Array<[ConnectionEventData, DOMHighResTimeStamp]> = []
+  private connectionTimeout: number | null = null
+
   constructor (options) {
     this.apiKey = options.apiKey
     this.apiRoot = options.apiRoot
@@ -47,18 +63,6 @@ export class ApiWrapper {
 
     // debug options
     this.mockRequests = options.mockRequests
-
-    this.unrecoverable = UNRECOVERABLE_ERRORS
-
-    /**
-     * If we should batch connections events
-     * defaults to false and we'll let the server tell us if we should
-     * @type {Boolean}
-     */
-    this.batchConnectionEvents = DEFAULT_OPTIONS.batchConnectionEvents
-
-    this.connectionEvents = []
-    this.connectionTimeout = null
 
     externalApi = wretch()
       // Set the base url
@@ -70,7 +74,7 @@ export class ApiWrapper {
         cache: 'no-cache',
         redirect: 'follow'
       })
-      // .catcher(405, this.handleFailedRequest)
+      // .catcher(405, this._handleFailedRequest)
   }
 
   /*
@@ -79,17 +83,20 @@ export class ApiWrapper {
    * initialiaze the session
    * @return {Promise} The fetch promise
    */
-  initialize (data = {}) {
+  async initialize (data: ApiInitializeData): Promise<Response> {
+    let toSend = {...data} as any
+
     // add the user details
     // used to create the participant object
-    data.userId = this.user.userId
-    data.userName = this.user.userName
-    data.apiKey = this.apiKey
+    toSend.userId = this.user.userId
+    toSend.userName = this.user.userName
+    toSend.apiKey = this.apiKey
 
     return this.makeRequest({
       // this is the only hard coded path that should not change
       path: '/initialize',
-      data: data
+      // @ts-ignore
+      data: toSend
     }).then((response) => {
       if (response) {
         if (response.urls) {
@@ -168,7 +175,7 @@ export class ApiWrapper {
     })
   }
 
-  sendConnectionEvent (data) {
+  sendConnectionEvent (data: ConnectionEventData) {
     if (this.batchConnectionEvents === false) {
       if (this.mockRequests && data.eventName === 'addPeer') {
         return {peer_id: data.peerId}
@@ -181,7 +188,7 @@ export class ApiWrapper {
       clearTimeout(this.connectionTimeout)
     }
 
-    this.connectionTimeout = setTimeout(() => {
+    this.connectionTimeout = window.setTimeout(() => {
       this.sendBatchConnectionEvents()
     }, DEFAULT_OPTIONS.connectionTimeoutValue)
 
@@ -200,44 +207,44 @@ export class ApiWrapper {
     }
   }
 
-  _handleSingleConnectionEvent ([ev, timestamp]) {
+  private _handleSingleConnectionEvent ([ev, timestamp]: [ConnectionEventData, DOMHighResTimeStamp]) {
     let now = Date.now()
-    let { event, peerId, eventData } = ev
+    let { eventName, peerId, data } = ev
 
     return this._sendConnectionEvent({
-      eventName: event,
+      eventName,
       peerId,
       timeDelta: now - timestamp,
-      data: eventData
+      data
     })
   }
 
-  _handleBatchConnectionEvents (events) {
+  private _handleBatchConnectionEvents (events: Array<[ConnectionEventData, DOMHighResTimeStamp]>) {
     let now = Date.now()
 
     let data = events.map((ev) => {
-      let [ data, timestamp ] = ev
-      let { event, peerId, eventData } = data
+      let [ eventData, timestamp ] = ev
+      let { eventName, peerId, data } = eventData
 
       return {
-        eventName: event,
+        eventName,
         peerId,
         timeDelta: now - timestamp,
-        data: eventData
+        data
       }
     })
 
     return this._sendBatchConnectionEvents(data)
   }
 
-  _sendConnectionEvent (data) {
+  private _sendConnectionEvent (data) {
     return this.makeRequest({
       path: urlsMap['connection'],
       data: data
     })
   }
 
-  _sendBatchConnectionEvents (data) {
+  private _sendBatchConnectionEvents (data) {
     return this.makeRequest({
       path: urlsMap['batch-connection'],
       data: data
@@ -270,9 +277,9 @@ export class ApiWrapper {
     }
   }
 
-  async makeRequest (options) {
+  private async makeRequest (options: MakeRequest) {
     // we just need the path, the base url is set at initialization
-    let {path, timestamp, data = {}} = options
+    let {path, timestamp, data} = options
 
     if (data.eventName === 'addPeer') {
       start = Date.now()
@@ -306,30 +313,32 @@ export class ApiWrapper {
       timestamp = Date.now()
     }
 
+    let toSend: string
     try {
-      data = JSON.stringify(data)
+      toSend = JSON.stringify(data)
     } catch (e) {
       throw new Error('Could not stringify request data')
     }
 
     // keep the content type as text plain to avoid CORS preflight requests
     let request = externalApi.url(path).content('text/plain')
+    let requestToMake
 
     if (options.method === 'put') {
-      request = request.put(data)
+      requestToMake = request.put(toSend)
     } else {
-      request = request.post(data)
+      requestToMake = request.post(toSend)
     }
 
-    return request
+    return requestToMake
       .setTimeout(REQUEST_TIMEOUT)
-      .json(this.handleResponse)
+      .json(this._handleResponse)
       .catch((response) => {
-        return this.handleFailedRequest({response, timestamp, options})
+        return this._handleFailedRequest({response, timestamp, options})
       })
   }
 
-  async handleResponse (response) {
+  private async _handleResponse (response) {
     if (response) {
       log(response)
     }
@@ -341,7 +350,7 @@ export class ApiWrapper {
    * Used to handle a failed fetch request
    * @param  {Object} arg
    */
-  async handleFailedRequest (arg) {
+  private async _handleFailedRequest (arg) {
     let {response, timestamp, options} = arg
     let {backoff = EXPONENTIAL_BACKOFF} = options
     let body
@@ -376,7 +385,7 @@ export class ApiWrapper {
     return Promise.reject(body)
   }
 
-  _createUrl (path = '/') {
+  private _createUrl (path = '/') {
     return `${this.apiRoot}${path}`
   }
 }
