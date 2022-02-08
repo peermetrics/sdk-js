@@ -1,6 +1,6 @@
 import {WebRTCStats} from '@peermetrics/webrtc-stats'
 
-import type {RemoveConnectionOptions} from '@peermetrics/webrtc-stats'
+import type { RemoveConnectionOptions } from '@peermetrics/webrtc-stats'
 
 import {User} from './user'
 import {ApiWrapper} from './api-wrapper'
@@ -9,6 +9,7 @@ import {enableDebug, log, PeerMetricsError} from './utils'
 
 import type {
   PeerMetricsConstructor,
+  WebrtcSDKs,
   AddConnectionOptions,
   SessionData,
   PageEvents,
@@ -67,6 +68,7 @@ export class PeerMetrics {
   private pageEvents: PageEvents
   private _options: PeerMetricsConstructor
   private _initialized: boolean = false
+  private webrtcSDK: WebrtcSDKs = ''
 
   /**
    * Used to initialize the SDK
@@ -175,6 +177,8 @@ export class PeerMetrics {
     this.pageEvents = options.pageEvents
 
     enableDebug(!!options.debug)
+
+    this.addSdkIntegration(options)
   }
 
   /**
@@ -218,6 +222,8 @@ export class PeerMetrics {
     // add app version and meta if present
     sessionData.appVersion = this._options.appVersion
     sessionData.meta = this._options.meta
+
+    sessionData.webrtcSdk = this.webrtcSDK
 
     try {
       // save this initial details about this user
@@ -268,14 +274,14 @@ export class PeerMetrics {
     }
 
     // validate the peerName if it exists
-    if ('peerName' in options) {
+    if (options.peerName) {
       if (typeof options.peerName !== 'string') {
         throw new Error('peerName should be a string')
       }
 
       // if the name is too long, just snip it
       if (options.peerName.length > CONSTRAINTS.peer.nameLength) {
-        options.peerName = options.peerName.substr(0, CONSTRAINTS.peer.nameLength)
+        options.peerName = options.peerName.slice(CONSTRAINTS.peer.nameLength)
       }
     }
 
@@ -289,7 +295,8 @@ export class PeerMetrics {
       const response = await this.apiWrapper.sendConnectionEvent({
         eventName: 'addConnection',
         peerId: options.peerId,
-        peerName: options.peerName
+        peerName: options.peerName,
+        isSfu: !!options.isSfu
       })
 
       if (!response) {
@@ -623,7 +630,7 @@ export class PeerMetrics {
   }
 
   private async _handleConnectionEvent (ev) {
-    let {event, peerId, data, delayed} = ev
+    let {event, peerId, connectionId, data, delayed} = ev
     let eventData = data
 
     switch (event) {
@@ -670,11 +677,66 @@ export class PeerMetrics {
       await this.apiWrapper.sendConnectionEvent({
         eventName: event,
         peerId,
+        connectionId,
         timestamp,
         data: eventData
       })
     } catch (e) {
       log(e)
+    }
+  }
+
+  public async addSdkIntegration (options: PeerMetricsConstructor) {
+    let foundIntegration = false
+
+    // mediasoup integration
+    if (options.mediasoup) {
+      let {device, serverId, serverName} = options.mediasoup
+      // check if the user sent the right device instance
+      if (!device || !device.observer) {
+        throw new Error("For integrating with MediaSoup, you need to send an instace of mediasoupClient.Device().")
+      }
+
+      if (!serverId) {
+        throw new Error("For integrating with MediaSoup, you need to send a serverId as argument.")
+      }
+
+      if (serverName) {
+        if (typeof serverName !== 'string') {
+          throw new Error('serverName should be a string')
+        }
+
+        // if the name is too long, just snip it
+        if (serverName.length > CONSTRAINTS.peer.nameLength) {
+          serverName = serverName.slice(CONSTRAINTS.peer.nameLength)
+        }
+      }
+
+      this.webrtcSDK = 'mediasoup'
+
+      // listen for new transports
+      device.observer.on('newtransport', (transport) => {
+        this.addConnection({
+          pc: transport.handler._pc,
+          peerId: serverId,
+          peerName: serverName,
+          isSfu: true,
+          remote: true
+        })
+      })
+
+      foundIntegration = true
+    }
+
+    // if the user is integrating with any sdk
+    if (foundIntegration) {
+      // and PM is already initialized
+      if (this._initialized) {
+        // update the session to signal as such
+        this.apiWrapper.addSessionDetails({
+          webrtcSdk: this.webrtcSDK
+        })
+      }
     }
   }
 }

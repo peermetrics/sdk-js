@@ -15,6 +15,12 @@ export interface DefaultOptions {
     pageEvents?: PageEvents
 }
 
+interface MediaSoupIntegration {
+    device: any,
+    serverId: string
+    serverName?: string
+}
+
 export interface PeerMetricsConstructor extends DefaultOptions {
     apiKey: string,
     userId: string,
@@ -23,14 +29,19 @@ export interface PeerMetricsConstructor extends DefaultOptions {
     conferenceName?: string,
     appVersion?: string,
     meta?: object
+    // sdk
+    mediasoup?: MediaSoupIntegration
 }
+
+export type WebrtcSDKs = '' | 'mediasoup' | 'jitsi'
 
 export interface SessionData {
     platform: object,
     constraints: object,
     devices: object,
     appVersion: string,
-    meta: object
+    meta: object,
+    webrtcSdk: string
 }
 
 export interface AddConnectionOptions {
@@ -38,7 +49,8 @@ export interface AddConnectionOptions {
     pc: RTCPeerConnection,
     connectionId?: string,
     remote?: boolean,
-    peerName?: string
+    peerName?: string,
+    isSfu?: boolean
 }
 
 export interface AddEventOptions extends Object {
