@@ -20,7 +20,9 @@
   "keywords": [
     "webrtc",
     "webrtc-stats",
-    "stats"
+    "stats",
+    "rtcpeerconnection",
+    "analytics"
   ],
   "dependencies": {
     "@peermetrics/webrtc-stats": "5.3.0",
