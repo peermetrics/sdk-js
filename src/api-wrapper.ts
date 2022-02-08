@@ -38,7 +38,8 @@ let urlsMap = {
   'events-browser': '/events/browser',
   'connection': '/connection',
   'batch-connection': '/connection/batch',
-  'stats': '/stats'
+  'stats': '/stats',
+  'track': '/tracks'
 }
 
 export class ApiWrapper {
@@ -177,8 +178,10 @@ export class ApiWrapper {
 
   sendConnectionEvent (data: ConnectionEventData) {
     if (this.batchConnectionEvents === false) {
-      if (this.mockRequests && data.eventName === 'addPeer') {
-        return {peer_id: data.peerId}
+      if (this.mockRequests && data.eventName === 'addConnection') {
+        return {
+          peer_id: data.peerId
+        }
       }
 
       return this._sendConnectionEvent(data)
@@ -258,6 +261,15 @@ export class ApiWrapper {
     })
   }
 
+  sendTrackEvent (data) {
+    return Promise.resolve()
+    // TODO: wait for BE
+    return this.makeRequest({
+      path: urlsMap['track'],
+      data: data
+    })
+  }
+
   /**
    * This is a special method because it uses beacons instead of fetch
    */
@@ -281,7 +293,7 @@ export class ApiWrapper {
     // we just need the path, the base url is set at initialization
     let {path, timestamp, data} = options
 
-    if (data.eventName === 'addPeer') {
+    if (data.eventName === 'addConnection' && start === 0) {
       start = Date.now()
     }
 

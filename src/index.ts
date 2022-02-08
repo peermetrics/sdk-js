@@ -1,5 +1,7 @@
 import {WebRTCStats} from '@peermetrics/webrtc-stats'
 
+import type {RemoveConnectionOptions} from '@peermetrics/webrtc-stats'
+
 import {User} from './user'
 import {ApiWrapper} from './api-wrapper'
 
@@ -7,7 +9,7 @@ import {enableDebug, log, PeerMetricsError} from './utils'
 
 import type {
   PeerMetricsConstructor,
-  AddPeerOptions,
+  AddConnectionOptions,
   SessionData,
   PageEvents,
   DefaultOptions,
@@ -49,6 +51,11 @@ const CONSTRAINTS = {
  * @type {Object}
  */
 let peersToMonitor = {}
+
+/**
+ * Used to keep track of connection IDs: the ones from WebrtcStats and the ones from the DB
+ */
+let monitoredConnections = {}
 
 let eventQueue = []
 
@@ -230,11 +237,16 @@ export class PeerMetrics {
     this._initializeStatsModule(response.getStatsInterval)
   }
 
+  async addPeer (options: AddConnectionOptions) {
+    console.warn('The addPeer() method has been deprecated, please use addConnection() instead')
+    return this.addConnection(options)
+  }
+
   /**
    * Used to start monitoring for a peer
    * @param {Object} options Options for this peer
    */
-  async addPeer (options: AddPeerOptions) {
+  async addConnection (options: AddConnectionOptions) {
     if (!this._initialized) {
       throw new Error('SDK not initialized. Please call initialize() first.')
     }
@@ -244,7 +256,7 @@ export class PeerMetrics {
     }
 
     if (typeof options !== 'object') {
-      throw new Error('Argument for addPeer() should be an object.')
+      throw new Error('Argument for addConnection() should be an object.')
     }
 
     if (!options.pc) {
@@ -267,24 +279,29 @@ export class PeerMetrics {
       }
     }
 
-    log('addPeer', options)
+    log('addConnection', options)
 
     try {
       // add the peer to webrtcStats now, so we don't miss any events
-      this.webrtcStats.addPeer(options)
+      let {connectionId} = await this.webrtcStats.addConnection(options)
 
       // make the request to add the peer to DB
       const response = await this.apiWrapper.sendConnectionEvent({
-        eventName: 'addPeer',
+        eventName: 'addConnection',
         peerId: options.peerId,
         peerName: options.peerName
       })
 
-      // we'll receive a new peer id, use peersToMonitor make a connection between them
-      let oldPeerId = options.peerId
-      peersToMonitor[oldPeerId] = response.peer_id
+      if (!response) {
+        throw new Error('There was a problem while adding this connection')
+      }
 
-      // all the events that we captured while waiting for 'addPeer' are here
+      // we'll receive a new peer id, use peersToMonitor to make the connection between them
+      peersToMonitor[options.peerId] = response.peer_id
+
+      monitoredConnections[connectionId] = response.connection_id || connectionId
+
+      // all the events that we captured while waiting for 'addConnection' are here
       // send them to the server
       eventQueue.map((event) => {
         this._handleTimelineEvent(event)
@@ -298,7 +315,33 @@ export class PeerMetrics {
   }
 
   /**
-   * Stop listening for events for a specific peer
+   * Stop listening for events for a specific connection
+   */
+  async removeConnection (options: RemoveConnectionOptions) {
+    let {peerId, connectionId, pc} = options
+
+    if (!peerId && !pc && !connectionId) {
+      throw new Error('Missing arguments. You need to either send a peerId and pc, or a connectionId.')
+    }
+
+    if ((peerId && !pc) || (pc && !peerId)) {
+      throw new Error('By not sending a connectionId, you need to send a peerId and a pc (RTCPeerConnection instance)')
+    }
+
+    connectionId = this.webrtcStats.removeConnection(options)
+
+    await this.apiWrapper.sendConnectionEvent({
+      eventName: 'removeConnection',
+      connectionId,
+      peerId: peerId
+    })
+
+    // cleanup
+    delete monitoredConnections[connectionId]
+  }
+
+  /**
+   * Stop listening for all connections for a specific peer
    * @param {string} peerId The peer ID to stop listening to
    */
   async removePeer (peerId: string) {
@@ -311,6 +354,13 @@ export class PeerMetrics {
     }
 
     this.webrtcStats.removePeer(peerId)
+
+    await this.apiWrapper.sendConnectionEvent({
+      eventName: 'removePeer',
+      peerId: peerId
+    })
+
+    delete peersToMonitor[peerId]
   }
 
   /**
@@ -334,21 +384,22 @@ export class PeerMetrics {
     } catch (e) {
       throw new Error('Custom event is not serializable.')
     }
-    this.apiWrapper.sendCustomEvent(options)
+
+    await this.apiWrapper.sendCustomEvent(options)
   }
 
   /**
    * Called when the current user has muted the mic
    */
   async mute () {
-    this.apiWrapper.sendCustomEvent({eventName: 'mute'})
+    return this.apiWrapper.sendCustomEvent({eventName: 'mute'})
   }
 
   /**
    * Called when the current user has unmuted the mic
    */
   async unmute () {
-    this.apiWrapper.sendCustomEvent({eventName: 'unmute'})
+    return this.apiWrapper.sendCustomEvent({eventName: 'unmute'})
   }
 
   private addPageEventListeners (options: PageEvents) {
@@ -405,7 +456,7 @@ export class PeerMetrics {
     // TODO: add full screen events
 
     if (document.body.requestFullscreen) {
-     window.addEventListener('fullscreenchange', (ev) => {
+      window.addEventListener('fullscreenchange', (ev) => {
       log(ev)
 
       // this.apiWrapper.sendPageEvent({
@@ -465,6 +516,12 @@ export class PeerMetrics {
       }
     }
 
+    // if we have a connectionId from the server, 
+    // swap it with the old value. same as peersToMonitor
+    if (ev.connectionId && ev.connectionId in monitoredConnections) {
+      ev.connectionId = monitoredConnections[ev.connectionId]
+    }
+
     switch (ev.tag) {
       case 'getUserMedia':
         this._handleGumEvent(ev)
@@ -473,7 +530,7 @@ export class PeerMetrics {
         this._handleStatsEvent(ev)
         break
       case 'track':
-        log(ev)
+        this._handleTrackEvent(ev)
         break
       default:
         this._handleConnectionEvent(ev)
@@ -533,9 +590,36 @@ export class PeerMetrics {
   }
 
   private _handleStatsEvent (ev) {
-    let {data, peerId} = ev
+    let {data, peerId, connectionId, timeTaken} = ev
 
-    this.apiWrapper.sendWebrtcStats({data, peerId})
+    this.apiWrapper.sendWebrtcStats({data, peerId, connectionId, timeTaken})
+  }
+
+  private _handleTrackEvent (ev) {
+    let {data, peerId, connectionId, event} = ev
+    let dataToSend = {
+      event,
+      peerId,
+      connectionId,
+      trackId: null,
+      data: {} as any
+    }
+
+    if (data.track) {
+      dataToSend.trackId = data.track.id
+    } else if (data.event) {
+      if (data.event.target) {
+        dataToSend.trackId = data.event.target.id
+      }
+
+      if (data.event.detail && data.event.detail.check) {
+        dataToSend.data.check = data.event.detail.check
+      }
+    } else {
+      log('Received track event without track')
+    }
+
+    this.apiWrapper.sendTrackEvent(dataToSend)
   }
 
   private async _handleConnectionEvent (ev) {
@@ -543,7 +627,7 @@ export class PeerMetrics {
     let eventData = data
 
     switch (event) {
-      case 'addPeer':
+      case 'addConnection':
         // we don't need the actual RTCPeerConnection object
         delete eventData.options.pc
 
@@ -570,8 +654,8 @@ export class PeerMetrics {
           }
         }
         break
-      case 'icecandidateerror':
-        eventData = ev.error.errorCode
+      case 'onicecandidateerror':
+        eventData = ev.error
         break
       case 'ondatachannel':
         eventData = null

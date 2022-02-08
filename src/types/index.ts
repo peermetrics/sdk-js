@@ -33,10 +33,12 @@ export interface SessionData {
     meta: object
 }
 
-export interface AddPeerOptions {
+export interface AddConnectionOptions {
     peerId: string,
-    peerName: string,
     pc: RTCPeerConnection,
+    connectionId?: string,
+    remote?: boolean,
+    peerName?: string
 }
 
 export interface AddEventOptions extends Object {
