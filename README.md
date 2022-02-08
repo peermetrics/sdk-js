@@ -2,13 +2,19 @@
 
 This is the repo for the `PeerMetrics` JS sdk. 
 
-Peer metrics is a service that helps you collect events and metrics for your `WebRTC` connections. You can read more about the service [here](https://peermetrics.io/).
+Peer metrics is a service that helps you collect events and metrics for your `WebRTC` connections. You can read more about the service on [peermetrics.io](https://peermetrics.io/).
 
+### Contents
 
-
-Contents
-
-1. [Install]()
+1. [Install](#install)
+2. [Usage](#usage)
+   1. [Options](#options)
+   2. [API](#api)
+4. [SDK integrations](#sdk-integrations)
+   1. [Mediasoup](#mediasoup)
+   1. [Janus](#janus)
+5. [Browser support](#browser-support)
+5. [License](#license)
 
 ## Install
 
@@ -21,7 +27,7 @@ npm install @peermetrics/sdk
 Or load it directly in the browser:
 
 ```html
-<script src="//cdn.peermetrics.io/js/sdk/peermetrics.js"></script>
+<script src="//cdn.peermetrics.io/js/sdk/peermetrics.min.js"></script>
 ```
 
 
@@ -94,7 +100,11 @@ let peerMetrics = new PeerMetrics({
 
 Used to initialize the SDK. Returns a promise that rejects if any problems were encountered (for example invalid apiKey, over quota, etc)
 
-#### `.addPeer(options)`
+#### `.addSdkIntegration(options)`
+
+Used to integrate with different SDKs. See [here](#sdk-integrations) list for options.
+
+#### `.addConnection(options)`
 Adds a peer to the watch list.
 `options`
 
@@ -118,11 +128,7 @@ This helps you get a better context of the actions the user took that might have
 
 Save event that user muted/unmuted the microphone
 
-### Browser support
-
-Right now, the sdk has been tested and is compatible with the latest version of Chromium based browsers (Chrome, Edge, Brave, etc), Firefox and Safari.
-
-### SDK integrations
+## SDK integrations
 
 You can use `PeerMetrics` with many well known WebRTC SDKs. 
 
@@ -146,19 +152,65 @@ await peerMetrics.addSdkIntegration(options)
 
 The `options` object differs depending on the integration. 
 
-The `PeerMetrics` SDK will take care of adding connection listeners and sending events, there's no need to call `addConnection()`
+**Note:** There's no need to call `addConnection()` anymore, the `PeerMetrics` SDK will take care of adding connection listeners and sending events.
 
-List of SDK that `PeerMetrics` supports:
 
-#### Mediasoup
+
+List of SDKs that `PeerMetrics` supports:
+
+### Mediasoup
+
+To integrate with [mediasoup](https://mediasoup.org/) you need to pass in the device instance:
 
 ```js
+import * as mediasoupClient from 'mediasoup-client'
+
+let device = new mediasoupClient.Device({
+    handlerName : this._handlerName
+})
+
 peerMetrics.addSdkIntegration({
-    device: device, // mandatory, the mediasoupClient.Device() instance
-    serverId: '', // string, mandatory, and ID that would help you indentify the SFU server the user connets to
-    serverName: '' // string, optional, and more readable name for this server
+	mediasoup: {
+        device: device, // mandatory, the mediasoupClient.Device() instance
+        serverId: '', // string, mandatory, an ID to indentify the SFU server the user connects to
+        serverName: '' // string, optional, a more readable name for this server
+    }
 })
 ```
+
+### Janus
+
+If you are using the [Janus](https://janus.conf.meetecho.com/docs/JS.html) javascript sdk to create connections to Janus server, you can integrate by sending the plugin handler that result from calling `.attach()`. For example:
+
+```js
+let janus = new Janus({
+    server: server,
+    success: function() {
+        // Attach to VideoCall plugin
+        janus.attach({
+            plugin: "janus.plugin.videocall",
+            opaqueId: opaqueId,
+            success: function(pluginHandle) {
+                peerMetrics.addSdkIntegration({
+					janus: {
+                        plugin: pluginHandle, // mandatory
+                        serverId: '', // string, mandatory, an ID for this SFU server
+                        serverName: '' // string, optional, a more readable name for this server
+                    }
+                })
+
+                ...
+            }
+        })
+    }
+})
+```
+
+
+
+## Browser support
+
+Right now, the sdk has been tested and is compatible with the latest version of Chromium based browsers (Chrome, Edge, Brave, etc), Firefox and Safari.
 
 
 

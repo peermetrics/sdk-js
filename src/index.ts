@@ -9,6 +9,7 @@ import {enableDebug, log, PeerMetricsError} from './utils'
 
 import type {
   PeerMetricsConstructor,
+  SdkIntegration,
   WebrtcSDKs,
   AddConnectionOptions,
   SessionData,
@@ -178,7 +179,8 @@ export class PeerMetrics {
 
     enableDebug(!!options.debug)
 
-    this.addSdkIntegration(options)
+    let { janus, mediasoup } = options
+    this.addSdkIntegration({janus, mediasoup})
   }
 
   /**
@@ -686,7 +688,7 @@ export class PeerMetrics {
     }
   }
 
-  public async addSdkIntegration (options: PeerMetricsConstructor) {
+  public async addSdkIntegration(options: SdkIntegration) {
     let foundIntegration = false
 
     // mediasoup integration
@@ -724,6 +726,62 @@ export class PeerMetrics {
           remote: true
         })
       })
+
+      foundIntegration = true
+    }
+
+    if (options.janus) {
+      let { plugin, serverId, serverName } = options.janus
+      // check if the user sent the right plugin instance
+      if (!plugin || typeof plugin.webrtcStuff !== 'object') {
+        throw new Error("For integrating with Janus, you need to send an instace of plugin after calling .attach().")
+      }
+
+      if (!serverId) {
+        throw new Error("For integrating with Janus, you need to send a serverId as argument.")
+      }
+
+      if (serverName) {
+        if (typeof serverName !== 'string') {
+          throw new Error('serverName should be a string')
+        }
+
+        // if the name is too long, just snip it
+        if (serverName.length > CONSTRAINTS.peer.nameLength) {
+          serverName = serverName.slice(CONSTRAINTS.peer.nameLength)
+        }
+      }
+
+      this.webrtcSDK = 'janus'
+
+      // if the pc is already attached. should not happen
+      if (plugin.webrtcStuff.pc) {
+        this.addConnection({
+          pc: plugin.webrtcStuff.pc,
+          peerId: serverId,
+          peerName: serverName,
+          isSfu: true,
+          remote: true
+        })
+      } else {
+        let addConnection = this.addConnection.bind(this)
+        // create a proxy so we can watch when the pc gets created
+        plugin.webrtcStuff = new Proxy(plugin.webrtcStuff, {
+          set: function (obj, prop, value) {
+            if (prop === 'pc') {
+              addConnection({
+                pc: value,
+                peerId: serverId,
+                peerName: serverName,
+                isSfu: true,
+                remote: true
+              })
+            }
+            obj[prop] = value;
+            return true;
+          }
+        })
+      }
 
       foundIntegration = true
     }

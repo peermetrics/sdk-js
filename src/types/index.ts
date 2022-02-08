@@ -16,12 +16,24 @@ export interface DefaultOptions {
 }
 
 interface MediaSoupIntegration {
-    device: any,
+    device: any
     serverId: string
     serverName?: string
 }
 
-export interface PeerMetricsConstructor extends DefaultOptions {
+interface JanusIntegrationInterface {
+    plugin: any
+    serverId: string
+    serverName?: string
+}
+
+export interface SdkIntegration {
+    // sdk
+    mediasoup?: MediaSoupIntegration,
+    janus?: JanusIntegrationInterface
+}
+
+export interface PeerMetricsConstructor extends DefaultOptions, SdkIntegration {
     apiKey: string,
     userId: string,
     userName?: string,
@@ -29,11 +41,9 @@ export interface PeerMetricsConstructor extends DefaultOptions {
     conferenceName?: string,
     appVersion?: string,
     meta?: object
-    // sdk
-    mediasoup?: MediaSoupIntegration
 }
 
-export type WebrtcSDKs = '' | 'mediasoup' | 'jitsi'
+export type WebrtcSDKs = '' | 'mediasoup' | 'jitsi' | 'janus'
 
 export interface SessionData {
     platform: object,
