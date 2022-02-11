@@ -27,10 +27,17 @@ interface JanusIntegrationInterface {
     serverName?: string
 }
 
+interface LiveKitIntegrationInterface {
+    room: any
+    serverId: string
+    serverName?: string
+}
+
 export interface SdkIntegration {
     // sdk
     mediasoup?: MediaSoupIntegration,
-    janus?: JanusIntegrationInterface
+    janus?: JanusIntegrationInterface,
+    livekit?: LiveKitIntegrationInterface
 }
 
 export interface PeerMetricsConstructor extends DefaultOptions, SdkIntegration {
@@ -43,7 +50,7 @@ export interface PeerMetricsConstructor extends DefaultOptions, SdkIntegration {
     meta?: object
 }
 
-export type WebrtcSDKs = '' | 'mediasoup' | 'jitsi' | 'janus'
+export type WebrtcSDKs = '' | 'mediasoup' | 'jitsi' | 'janus' | 'livekit'
 
 export interface SessionData {
     platform: object,

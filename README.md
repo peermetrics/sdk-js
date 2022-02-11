@@ -11,6 +11,7 @@ Peer metrics is a service that helps you collect events and metrics for your `We
    1. [Options](#options)
    2. [API](#api)
 4. [SDK integrations](#sdk-integrations)
+   1. [LiveKit](#livekit)
    1. [Mediasoup](#mediasoup)
    1. [Janus](#janus)
 5. [Browser support](#browser-support)
@@ -157,6 +158,26 @@ The `options` object differs depending on the integration.
 
 
 List of SDKs that `PeerMetrics` supports:
+
+### LiveKit
+
+To integrate with [LiveKit' js sdk](https://github.com/livekit/client-sdk-js) you need to pass an instance of `Room`.
+
+**Note** You need at least version `v0.16.2` of `livekit-client`.
+
+```js
+import { Room } from 'livekit-client'
+
+const room = new Room(roomOptions)
+
+peerMetrics.addSdkIntegration({
+	livekit: {
+        room: room, // mandatory, the livekit client Room instance
+        serverId: '', // string, mandatory, an ID to indentify the SFU server the user connects to
+        serverName: '' // string, optional, a more readable name for this server
+    }
+})
+```
 
 ### Mediasoup
 
