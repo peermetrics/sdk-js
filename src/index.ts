@@ -263,6 +263,11 @@ export class PeerMetrics {
       throw new Error('The stats module is not instantiated yet.')
     }
 
+    // if the user is using an sdk integration, warn him that a call to addConnection is not needed
+    if (this.webrtcSDK) {
+      console.warn('You\'ve enabled an integration with an WebRTC sdk, a call to addConnection() is not needed anymore.')
+    }
+
     if (typeof options !== 'object') {
       throw new Error('Argument for addConnection() should be an object.')
     }
@@ -370,6 +375,164 @@ export class PeerMetrics {
     })
 
     delete peersToMonitor[peerId]
+  }
+
+  /**
+   * Method used to add an integration with different WebRTC SDKs
+   * @param options Options object
+   */
+  public async addSdkIntegration(options: SdkIntegration) {
+    let foundIntegration = false
+
+    // mediasoup integration
+    if (options.mediasoup) {
+      let { device, serverId, serverName } = options.mediasoup
+      // check if the user sent the right device instance
+      if (!device || !device.observer) {
+        throw new Error("For integrating with MediaSoup, you need to send an instace of mediasoupClient.Device().")
+      }
+
+      if (!serverId) {
+        throw new Error("For integrating with MediaSoup, you need to send a serverId as argument.")
+      }
+
+      if (serverName) {
+        if (typeof serverName !== 'string') {
+          throw new Error('serverName should be a string')
+        }
+
+        // if the name is too long, just snip it
+        if (serverName.length > CONSTRAINTS.peer.nameLength) {
+          serverName = serverName.slice(CONSTRAINTS.peer.nameLength)
+        }
+      }
+
+      this.webrtcSDK = 'mediasoup'
+
+      // listen for new transports
+      device.observer.on('newtransport', (transport) => {
+        this.addConnection({
+          pc: transport.handler._pc,
+          peerId: serverId,
+          peerName: serverName,
+          isSfu: true,
+          remote: true
+        })
+      })
+
+      foundIntegration = true
+    }
+
+    if (options.janus) {
+      let { plugin, serverId, serverName } = options.janus
+      // check if the user sent the right plugin instance
+      if (!plugin || typeof plugin.webrtcStuff !== 'object') {
+        throw new Error("For integrating with Janus, you need to send an instace of plugin after calling .attach().")
+      }
+
+      if (!serverId) {
+        throw new Error("For integrating with Janus, you need to send a serverId as argument.")
+      }
+
+      if (serverName) {
+        if (typeof serverName !== 'string') {
+          throw new Error('serverName should be a string')
+        }
+
+        // if the name is too long, just snip it
+        if (serverName.length > CONSTRAINTS.peer.nameLength) {
+          serverName = serverName.slice(CONSTRAINTS.peer.nameLength)
+        }
+      }
+
+      this.webrtcSDK = 'janus'
+
+      // if the pc is already attached. should not happen
+      if (plugin.webrtcStuff.pc) {
+        this.addConnection({
+          pc: plugin.webrtcStuff.pc,
+          peerId: serverId,
+          peerName: serverName,
+          isSfu: true,
+          remote: true
+        })
+      } else {
+        let addConnection = this.addConnection.bind(this)
+        // create a proxy so we can watch when the pc gets created
+        plugin.webrtcStuff = new Proxy(plugin.webrtcStuff, {
+          set: function (obj, prop, value) {
+            if (prop === 'pc') {
+              addConnection({
+                pc: value,
+                peerId: serverId,
+                peerName: serverName,
+                isSfu: true,
+                remote: true
+              })
+            }
+            obj[prop] = value;
+            return true;
+          }
+        })
+      }
+
+      foundIntegration = true
+    }
+
+    if (options.livekit) {
+      let { room, serverId, serverName } = options.livekit
+      // check if the user sent the right room instance
+      if (!room || typeof room.engine !== 'object') {
+        throw new Error("For integrating with LiveKit, you need to send an instace of the room as soon as creating it.")
+      }
+
+      if (!serverId) {
+        throw new Error("For integrating with LiveKit, you need to send a serverId as argument.")
+      }
+
+      if (serverName) {
+        if (typeof serverName !== 'string') {
+          throw new Error('serverName should be a string')
+        }
+
+        // if the name is too long, just snip it
+        if (serverName.length > CONSTRAINTS.peer.nameLength) {
+          serverName = serverName.slice(CONSTRAINTS.peer.nameLength)
+        }
+      }
+
+      this.webrtcSDK = 'livekit'
+
+      // listen for the transportCreated event
+      room.engine.on('transportsCreated', (publiser, subscriber) => {
+        this.addConnection({
+          pc: publiser.pc,
+          peerId: serverId,
+          peerName: serverName,
+          isSfu: true
+        })
+
+        this.addConnection({
+          pc: subscriber.pc,
+          peerId: serverId,
+          peerName: serverName,
+          isSfu: true
+        })
+      })
+    }
+
+    // if the user is integrating with any sdk
+    if (foundIntegration) {
+      // and PM is already initialized
+      if (this._initialized) {
+        // update the session to signal as such
+        this.apiWrapper.addSessionDetails({
+          webrtcSdk: this.webrtcSDK
+        })
+      }
+    } else {
+      throw new Error("We could not find any integration details in the options object that was passed in.")
+    }
   }
 
   /**
@@ -685,116 +848,6 @@ export class PeerMetrics {
       })
     } catch (e) {
       log(e)
-    }
-  }
-
-  public async addSdkIntegration(options: SdkIntegration) {
-    let foundIntegration = false
-
-    // mediasoup integration
-    if (options.mediasoup) {
-      let {device, serverId, serverName} = options.mediasoup
-      // check if the user sent the right device instance
-      if (!device || !device.observer) {
-        throw new Error("For integrating with MediaSoup, you need to send an instace of mediasoupClient.Device().")
-      }
-
-      if (!serverId) {
-        throw new Error("For integrating with MediaSoup, you need to send a serverId as argument.")
-      }
-
-      if (serverName) {
-        if (typeof serverName !== 'string') {
-          throw new Error('serverName should be a string')
-        }
-
-        // if the name is too long, just snip it
-        if (serverName.length > CONSTRAINTS.peer.nameLength) {
-          serverName = serverName.slice(CONSTRAINTS.peer.nameLength)
-        }
-      }
-
-      this.webrtcSDK = 'mediasoup'
-
-      // listen for new transports
-      device.observer.on('newtransport', (transport) => {
-        this.addConnection({
-          pc: transport.handler._pc,
-          peerId: serverId,
-          peerName: serverName,
-          isSfu: true,
-          remote: true
-        })
-      })
-
-      foundIntegration = true
-    }
-
-    if (options.janus) {
-      let { plugin, serverId, serverName } = options.janus
-      // check if the user sent the right plugin instance
-      if (!plugin || typeof plugin.webrtcStuff !== 'object') {
-        throw new Error("For integrating with Janus, you need to send an instace of plugin after calling .attach().")
-      }
-
-      if (!serverId) {
-        throw new Error("For integrating with Janus, you need to send a serverId as argument.")
-      }
-
-      if (serverName) {
-        if (typeof serverName !== 'string') {
-          throw new Error('serverName should be a string')
-        }
-
-        // if the name is too long, just snip it
-        if (serverName.length > CONSTRAINTS.peer.nameLength) {
-          serverName = serverName.slice(CONSTRAINTS.peer.nameLength)
-        }
-      }
-
-      this.webrtcSDK = 'janus'
-
-      // if the pc is already attached. should not happen
-      if (plugin.webrtcStuff.pc) {
-        this.addConnection({
-          pc: plugin.webrtcStuff.pc,
-          peerId: serverId,
-          peerName: serverName,
-          isSfu: true,
-          remote: true
-        })
-      } else {
-        let addConnection = this.addConnection.bind(this)
-        // create a proxy so we can watch when the pc gets created
-        plugin.webrtcStuff = new Proxy(plugin.webrtcStuff, {
-          set: function (obj, prop, value) {
-            if (prop === 'pc') {
-              addConnection({
-                pc: value,
-                peerId: serverId,
-                peerName: serverName,
-                isSfu: true,
-                remote: true
-              })
-            }
-            obj[prop] = value;
-            return true;
-          }
-        })
-      }
-
-      foundIntegration = true
-    }
-
-    // if the user is integrating with any sdk
-    if (foundIntegration) {
-      // and PM is already initialized
-      if (this._initialized) {
-        // update the session to signal as such
-        this.apiWrapper.addSessionDetails({
-          webrtcSdk: this.webrtcSDK
-        })
-      }
     }
   }
 }
