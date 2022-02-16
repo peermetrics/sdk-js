@@ -1,5 +1,7 @@
 # PeerMetrics sdk
 
+<img src="https://img.shields.io/npm/v/@peermetrics/sdk">
+
 This is the repo for the `PeerMetrics` JS sdk. 
 
 Peer metrics is a service that helps you collect events and metrics for your `WebRTC` connections. You can read more about the service on [peermetrics.io](https://peermetrics.io/).
@@ -12,6 +14,7 @@ Peer metrics is a service that helps you collect events and metrics for your `We
    2. [API](#api)
 4. [SDK integrations](#sdk-integrations)
    1. [LiveKit](#livekit)
+   1. [Twilio Video](#twilio-video)
    1. [Mediasoup](#mediasoup)
    1. [Janus](#janus)
 5. [Browser support](#browser-support)
@@ -140,8 +143,8 @@ let peerMetrics = new PeerMetrics({
     apiKey: '7090df95cd247f4aa735779636b202',
     userId: '1234',
     userName: 'My user',
-    conferenceId: 'conference-1',
-    conferenceName: 'Conference from 4pm'
+    conferenceId: 'room-1',
+    conferenceName: 'Call from 4pm'
 })
 // initialize the SDK
 await peerMetrics.initialize()
@@ -178,6 +181,27 @@ peerMetrics.addSdkIntegration({
     }
 })
 ```
+
+### Twilio Video
+
+You can integrate with v2 of [Twilio Video SDK](https://github.com/twilio/twilio-video.js). To do that, you need to pass the instance of `Room`. For example:
+
+```js
+import Video from 'twilio-video'
+
+Video.connect('$TOKEN', { name: 'room-name' }).then(room => {
+    peerMetrics.addSdkIntegration({
+        twilioVideo: {
+            room: room, // mandatory, the twilio video Room instance
+            serverId: '', // string, mandatory, an ID to indentify this connection
+            serverName: '' // string, optional, a more readable name for this server
+        }
+    })
+})
+
+```
+
+
 
 ### Mediasoup
 
