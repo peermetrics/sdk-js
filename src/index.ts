@@ -178,9 +178,6 @@ export class PeerMetrics {
     this.pageEvents = options.pageEvents
 
     enableDebug(!!options.debug)
-
-    let { janus, mediasoup } = options
-    this.addSdkIntegration({janus, mediasoup})
   }
 
   /**
@@ -519,6 +516,41 @@ export class PeerMetrics {
           isSfu: true
         })
       })
+    }
+
+    if (options.twilioVideo) {
+      let { room, serverId, serverName } = options.twilioVideo
+      // check if the user sent the right room instance
+      if (!room || typeof room._signaling !== 'object') {
+        throw new Error("For integrating with Twilio Video SDK, you need to send an instace of the room as soon as you create it.")
+      }
+
+      if (!serverId) {
+        throw new Error("For integrating with Twilio Video SDK, you need to send a serverId as argument.")
+      }
+
+      if (serverName) {
+        if (typeof serverName !== 'string') {
+          throw new Error('serverName should be a string')
+        }
+
+        // if the name is too long, just snip it
+        if (serverName.length > CONSTRAINTS.peer.nameLength) {
+          serverName = serverName.slice(CONSTRAINTS.peer.nameLength)
+        }
+      }
+
+      this.webrtcSDK = 'twilioVideo'
+
+      room._signaling._peerConnectionManager._peerConnections.forEach(pcs => {
+        this.addConnection({
+          pc: pcs._peerConnection._peerConnection,
+          peerId: serverId,
+          peerName: serverName
+        })
+      })
+
+      foundIntegration = true
     }
 
     // if the user is integrating with any sdk

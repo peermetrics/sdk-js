@@ -256,8 +256,6 @@ export class ApiWrapper {
   }
 
   sendTrackEvent (data) {
-    return Promise.resolve()
-    // TODO: wait for BE
     return this.makeRequest({
       path: urlsMap['track'],
       data: data

@@ -33,11 +33,18 @@ interface LiveKitIntegrationInterface {
     serverName?: string
 }
 
+interface TwilioVideoIntegrationInterface {
+    room: any
+    serverId: string
+    serverName?: string
+}
+
 export interface SdkIntegration {
     // sdk
     mediasoup?: MediaSoupIntegration,
     janus?: JanusIntegrationInterface,
-    livekit?: LiveKitIntegrationInterface
+    livekit?: LiveKitIntegrationInterface,
+    twilioVideo?: TwilioVideoIntegrationInterface
 }
 
 export interface PeerMetricsConstructor extends DefaultOptions, SdkIntegration {
@@ -50,7 +57,7 @@ export interface PeerMetricsConstructor extends DefaultOptions, SdkIntegration {
     meta?: object
 }
 
-export type WebrtcSDKs = '' | 'mediasoup' | 'jitsi' | 'janus' | 'livekit'
+export type WebrtcSDKs = '' | 'mediasoup' | 'jitsi' | 'janus' | 'livekit' | 'twilioVideo'
 
 export interface SessionData {
     platform: object,
