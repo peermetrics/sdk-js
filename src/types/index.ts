@@ -1,6 +1,10 @@
 
 export * from './api'
 
+declare global {
+    interface Window { PeerMetricsOptions: any; }
+}
+
 export interface PageEvents {
     pageVisibility: boolean,
     // fullScreen: boolean
@@ -39,15 +43,16 @@ interface TwilioVideoIntegrationInterface {
     serverName?: string
 }
 
-export interface SdkIntegration {
+export interface SdkIntegrationInterface {
     // sdk
     mediasoup?: MediaSoupIntegration,
     janus?: JanusIntegrationInterface,
     livekit?: LiveKitIntegrationInterface,
     twilioVideo?: TwilioVideoIntegrationInterface
+    vonage?: boolean
 }
 
-export interface PeerMetricsConstructor extends DefaultOptions, SdkIntegration {
+export interface PeerMetricsConstructor extends DefaultOptions, SdkIntegrationInterface {
     apiKey: string,
     userId: string,
     userName?: string,
@@ -57,7 +62,7 @@ export interface PeerMetricsConstructor extends DefaultOptions, SdkIntegration {
     meta?: object
 }
 
-export type WebrtcSDKs = '' | 'mediasoup' | 'jitsi' | 'janus' | 'livekit' | 'twilioVideo'
+export type WebrtcSDKs = '' | 'mediasoup' | 'jitsi' | 'janus' | 'livekit' | 'twilioVideo' | 'vonage'
 
 export interface SessionData {
     platform: object,
