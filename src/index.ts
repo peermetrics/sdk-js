@@ -3,50 +3,21 @@ import {WebRTCStats} from '@peermetrics/webrtc-stats'
 import type { RemoveConnectionOptions } from '@peermetrics/webrtc-stats'
 
 import {User} from './user'
+import { DEFAULT_OPTIONS, CONSTRAINTS } from "./constants";
 import {ApiWrapper} from './api-wrapper'
+import SdkIntegration from "./sdk_integrations";
 
-import {enableDebug, log, PeerMetricsError} from './utils'
+import { enableDebug, log, wrapPeerConnection, PeerMetricsError} from './utils'
 
 import type {
   PeerMetricsConstructor,
-  SdkIntegration,
+  SdkIntegrationInterface,
   WebrtcSDKs,
   AddConnectionOptions,
   SessionData,
   PageEvents,
-  DefaultOptions,
   AddEventOptions
 } from './types/index'
-
-const DEFAULT_OPTIONS = {
-  pageEvents: {
-    pageVisibility: false,
-    // fullScreen: false
-  },
-  apiRoot: 'https://api.peermetrics.io/v1',
-  debug: false,
-  mockRequests: false,
-  remote: true,
-  getStatsInterval: 5000
-} as DefaultOptions
-
-const CONSTRAINTS = {
-  meta: {
-    // how many tags per conference we allow
-    length: 5,
-    keyLength: 64,
-    accepted: ['number', 'string', 'boolean']
-    // how long should a tag be
-    // tagLengs: 50
-  },
-  customEvent: {
-    eventNameLength: 120,
-    bodyLength: 2048
-  },
-  peer: {
-    nameLength: 120
-  }
-}
 
 /**
  * Used to keep track of peers
@@ -60,6 +31,17 @@ let peersToMonitor = {}
 let monitoredConnections = {}
 
 let eventQueue = []
+
+let peerConnectionEventEmitter = null
+// if the user has provided an options object
+if (window && typeof window.PeerMetricsOptions === 'object') {
+  if (window.PeerMetricsOptions.wrapPeerConnection === true) {
+    peerConnectionEventEmitter = wrapPeerConnection(window)
+    if (!peerConnectionEventEmitter) {
+      console.warn('Could not wrap window.RTCPeerConnection')
+    }
+  }
+}
 
 export class PeerMetrics {
 
@@ -261,9 +243,9 @@ export class PeerMetrics {
     }
 
     // if the user is using an sdk integration, warn him that a call to addConnection is not needed
-    if (this.webrtcSDK) {
-      console.warn('You\'ve enabled an integration with an WebRTC sdk, a call to addConnection() is not needed anymore.')
-    }
+    // if (this.webrtcSDK) {
+    //   console.warn('You\'ve enabled an integration with an WebRTC sdk, a call to addConnection() is not needed anymore.')
+    // }
 
     if (typeof options !== 'object') {
       throw new Error('Argument for addConnection() should be an object.')
@@ -300,6 +282,7 @@ export class PeerMetrics {
         eventName: 'addConnection',
         peerId: options.peerId,
         peerName: options.peerName,
+        connectionState: options.pc.connectionState,
         isSfu: !!options.isSfu
       })
 
@@ -378,183 +361,20 @@ export class PeerMetrics {
    * Method used to add an integration with different WebRTC SDKs
    * @param options Options object
    */
-  public async addSdkIntegration(options: SdkIntegration) {
-    let foundIntegration = false
+  public async addSdkIntegration(options: SdkIntegrationInterface) {
 
-    // mediasoup integration
-    if (options.mediasoup) {
-      let { device, serverId, serverName } = options.mediasoup
-      // check if the user sent the right device instance
-      if (!device || !device.observer) {
-        throw new Error("For integrating with MediaSoup, you need to send an instace of mediasoupClient.Device().")
-      }
+    let sdkIntegration = new SdkIntegration()
 
-      if (!serverId) {
-        throw new Error("For integrating with MediaSoup, you need to send a serverId as argument.")
-      }
+    sdkIntegration.on('newConnection', (options) => {
+      this.addConnection(options)
+    })
 
-      if (serverName) {
-        if (typeof serverName !== 'string') {
-          throw new Error('serverName should be a string')
-        }
+    sdkIntegration.addIntegration(options, peerConnectionEventEmitter)
 
-        // if the name is too long, just snip it
-        if (serverName.length > CONSTRAINTS.peer.nameLength) {
-          serverName = serverName.slice(CONSTRAINTS.peer.nameLength)
-        }
-      }
-
-      this.webrtcSDK = 'mediasoup'
-
-      // listen for new transports
-      device.observer.on('newtransport', (transport) => {
-        this.addConnection({
-          pc: transport.handler._pc,
-          peerId: serverId,
-          peerName: serverName,
-          isSfu: true,
-          remote: true
-        })
-      })
-
-      foundIntegration = true
-    }
-
-    if (options.janus) {
-      let { plugin, serverId, serverName } = options.janus
-      // check if the user sent the right plugin instance
-      if (!plugin || typeof plugin.webrtcStuff !== 'object') {
-        throw new Error("For integrating with Janus, you need to send an instace of plugin after calling .attach().")
-      }
-
-      if (!serverId) {
-        throw new Error("For integrating with Janus, you need to send a serverId as argument.")
-      }
-
-      if (serverName) {
-        if (typeof serverName !== 'string') {
-          throw new Error('serverName should be a string')
-        }
-
-        // if the name is too long, just snip it
-        if (serverName.length > CONSTRAINTS.peer.nameLength) {
-          serverName = serverName.slice(CONSTRAINTS.peer.nameLength)
-        }
-      }
-
-      this.webrtcSDK = 'janus'
-
-      // if the pc is already attached. should not happen
-      if (plugin.webrtcStuff.pc) {
-        this.addConnection({
-          pc: plugin.webrtcStuff.pc,
-          peerId: serverId,
-          peerName: serverName,
-          isSfu: true,
-          remote: true
-        })
-      } else {
-        let addConnection = this.addConnection.bind(this)
-        // create a proxy so we can watch when the pc gets created
-        plugin.webrtcStuff = new Proxy(plugin.webrtcStuff, {
-          set: function (obj, prop, value) {
-            if (prop === 'pc') {
-              addConnection({
-                pc: value,
-                peerId: serverId,
-                peerName: serverName,
-                isSfu: true,
-                remote: true
-              })
-            }
-            obj[prop] = value;
-            return true;
-          }
-        })
-      }
-
-      foundIntegration = true
-    }
-
-    if (options.livekit) {
-      let { room, serverId, serverName } = options.livekit
-      // check if the user sent the right room instance
-      if (!room || typeof room.engine !== 'object') {
-        throw new Error("For integrating with LiveKit, you need to send an instace of the room as soon as creating it.")
-      }
-
-      if (!serverId) {
-        throw new Error("For integrating with LiveKit, you need to send a serverId as argument.")
-      }
-
-      if (serverName) {
-        if (typeof serverName !== 'string') {
-          throw new Error('serverName should be a string')
-        }
-
-        // if the name is too long, just snip it
-        if (serverName.length > CONSTRAINTS.peer.nameLength) {
-          serverName = serverName.slice(CONSTRAINTS.peer.nameLength)
-        }
-      }
-
-      this.webrtcSDK = 'livekit'
-
-      // listen for the transportCreated event
-      room.engine.on('transportsCreated', (publiser, subscriber) => {
-        this.addConnection({
-          pc: publiser.pc,
-          peerId: serverId,
-          peerName: serverName,
-          isSfu: true
-        })
-
-        this.addConnection({
-          pc: subscriber.pc,
-          peerId: serverId,
-          peerName: serverName,
-          isSfu: true
-        })
-      })
-    }
-
-    if (options.twilioVideo) {
-      let { room, serverId, serverName } = options.twilioVideo
-      // check if the user sent the right room instance
-      if (!room || typeof room._signaling !== 'object') {
-        throw new Error("For integrating with Twilio Video SDK, you need to send an instace of the room as soon as you create it.")
-      }
-
-      if (!serverId) {
-        throw new Error("For integrating with Twilio Video SDK, you need to send a serverId as argument.")
-      }
-
-      if (serverName) {
-        if (typeof serverName !== 'string') {
-          throw new Error('serverName should be a string')
-        }
-
-        // if the name is too long, just snip it
-        if (serverName.length > CONSTRAINTS.peer.nameLength) {
-          serverName = serverName.slice(CONSTRAINTS.peer.nameLength)
-        }
-      }
-
-      this.webrtcSDK = 'twilioVideo'
-
-      room._signaling._peerConnectionManager._peerConnections.forEach(pcs => {
-        this.addConnection({
-          pc: pcs._peerConnection._peerConnection,
-          peerId: serverId,
-          peerName: serverName
-        })
-      })
-
-      foundIntegration = true
-    }
+    this.webrtcSDK = sdkIntegration.webrtcSDK
 
     // if the user is integrating with any sdk
-    if (foundIntegration) {
+    if (sdkIntegration.foundIntegration) {
       // and PM is already initialized
       if (this._initialized) {
         // update the session to signal as such
@@ -688,7 +508,7 @@ export class PeerMetrics {
     this.webrtcStats = new WebRTCStats({
       getStatsInterval: getStatsInterval,
       rawStats: false,
-      statsObject: false,
+      statsObject: true,
       filteredStats: false,
       remote: this._options.remote,
       wrapGetUserMedia: true,
@@ -722,8 +542,14 @@ export class PeerMetrics {
 
     // if we have a connectionId from the server, 
     // swap it with the old value. same as peersToMonitor
-    if (ev.connectionId && ev.connectionId in monitoredConnections) {
-      ev.connectionId = monitoredConnections[ev.connectionId]
+    if (ev.connectionId) {
+      if (ev.connectionId in monitoredConnections) {
+        ev.connectionId = monitoredConnections[ev.connectionId]
+      } else {
+        ev.delayed = true
+        eventQueue.push(ev)
+        return
+      }
     }
 
     switch (ev.tag) {

@@ -256,6 +256,7 @@ export class ApiWrapper {
   }
 
   sendTrackEvent (data) {
+    return Promise.resolve()
     return this.makeRequest({
       path: urlsMap['track'],
       data: data

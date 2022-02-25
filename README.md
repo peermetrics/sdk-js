@@ -17,6 +17,7 @@ Peer metrics is a service that helps you collect events and metrics for your `We
    1. [Twilio Video](#twilio-video)
    1. [Mediasoup](#mediasoup)
    1. [Janus](#janus)
+   1. [Vonage](#vonage)
 5. [Browser support](#browser-support)
 5. [License](#license)
 
@@ -249,6 +250,40 @@ let janus = new Janus({
         })
     }
 })
+```
+
+### Vonage
+
+To integrate with Vonage SDK (previously Tokbox) you will need to load `PeerMetrics` before the them. For example:
+
+```html
+<!-- First we need to set a special global option -->
+<script>
+    var PeerMetricsOptions = {
+        wrapPeerConnection: true
+    }
+</script>
+
+<!-- Load the sdk -->
+<script src="//cdn.peermetrics.io/js/sdk/peermetrics.min.js"></script>
+
+<!-- Then setup PeerMetrics. This can alse be done later, but before calling OT.initSession() -->
+<script>
+    (async () => {
+        let stats = new PeerMetrics({
+            ...
+        })
+        await stats.initialize()
+
+        stats.addSdkIntegration({
+            vonage: true
+        })
+    })()
+</script>
+
+<!-- Load the OpenTok sdk -->
+<script src="https://static.opentok.com/v2/js/opentok.min.js"></script>
+
 ```
 
 
