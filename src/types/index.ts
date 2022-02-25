@@ -39,8 +39,6 @@ interface LiveKitIntegrationInterface {
 
 interface TwilioVideoIntegrationInterface {
     room: any
-    serverId: string
-    serverName?: string
 }
 
 export interface SdkIntegrationInterface {

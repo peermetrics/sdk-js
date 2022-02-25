@@ -68,8 +68,6 @@ export default class SdkIntegration extends EventEmitter {
         
         serverName = this.checkServerName(serverName)
 
-        this.webrtcSDK = 'janus'
-
         // if the pc is already attached. should not happen
         if (plugin.webrtcStuff.pc) {
             this.emit('newConnection', {
@@ -99,6 +97,7 @@ export default class SdkIntegration extends EventEmitter {
             })
         }
 
+        this.webrtcSDK = 'janus'
         this.foundIntegration = true
     }
 
@@ -118,8 +117,6 @@ export default class SdkIntegration extends EventEmitter {
 
         serverName = this.checkServerName(serverName)
 
-        this.webrtcSDK = 'livekit'
-
         // listen for the transportCreated event
         room.engine.on('transportsCreated', (publiser, subscriber) => {
             this.emit('newConnection', {
@@ -137,34 +134,28 @@ export default class SdkIntegration extends EventEmitter {
             })
         })
 
+        this.webrtcSDK = 'livekit'
         this.foundIntegration = true
     }
 
     addTwilioVideoIntegration (options) {
         if (!options) return
 
-        let { room, serverId, serverName } = options
+        let { room } = options
         // check if the user sent the right room instance
         if (!room || typeof room._signaling !== 'object') {
             throw new Error("For integrating with Twilio Video SDK, you need to send an instace of the room as soon as you create it.")
         }
 
-        if (!serverId) {
-            throw new Error("For integrating with Twilio Video SDK, you need to send a serverId as argument.")
-        }
-
-        serverName = this.checkServerName(serverName)
-
-        this.webrtcSDK = 'twilioVideo'
-
         room._signaling._peerConnectionManager._peerConnections.forEach(pcs => {
             this.emit('newConnection', {
                 pc: pcs._peerConnection._peerConnection,
-                peerId: serverId,
-                peerName: serverName
+                peerId: 'twilio-sfu-server',
+                peerName: 'Twilio SFU Server'
             })
         })
-
+        
+        this.webrtcSDK = 'twilioVideo'
         this.foundIntegration = true
     }
 

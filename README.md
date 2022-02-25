@@ -194,8 +194,6 @@ Video.connect('$TOKEN', { name: 'room-name' }).then(room => {
     peerMetrics.addSdkIntegration({
         twilioVideo: {
             room: room, // mandatory, the twilio video Room instance
-            serverId: '', // string, mandatory, an ID to indentify this connection
-            serverName: '' // string, optional, a more readable name for this server
         }
     })
 })
@@ -254,7 +252,7 @@ let janus = new Janus({
 
 ### Vonage
 
-To integrate with Vonage SDK (previously Tokbox) you will need to load `PeerMetrics` before the them. For example:
+To integrate with [Vonage](https://www.vonage.com/) SDK (previously Tokbox) you will need to load `PeerMetrics` before the them. For example:
 
 ```html
 <!-- First we need to set a special global option -->
@@ -290,7 +288,7 @@ To integrate with Vonage SDK (previously Tokbox) you will need to load `PeerMetr
 
 ## Browser support
 
-Right now, the sdk has been tested and is compatible with the latest version of Chromium based browsers (Chrome, Edge, Brave, etc), Firefox and Safari.
+Right now, the SDK has been tested and is compatible with the latest version of Chromium based browsers (Chrome, Edge, Brave, etc), Firefox and Safari.
 
 
 
