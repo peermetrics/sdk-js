@@ -635,6 +635,11 @@ export class PeerMetrics {
       data: {} as any
     }
 
+    if (event === 'ontrack') {
+      dataToSend.data = data.track
+      delete dataToSend.data._track
+    }
+
     if (data.track) {
       dataToSend.trackId = data.track.id
     } else if (data.event) {

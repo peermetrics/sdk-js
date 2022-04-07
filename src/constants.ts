@@ -26,6 +26,7 @@ export const CONSTRAINTS = {
         bodyLength: 2048
     },
     peer: {
-        nameLength: 120
+        nameLength: 64,
+        idLength: 64
     }
 }

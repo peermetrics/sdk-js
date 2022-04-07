@@ -12,13 +12,13 @@ Peer metrics is a service that helps you collect events and metrics for your `We
 2. [Usage](#usage)
    1. [Options](#options)
    2. [API](#api)
-4. [SDK integrations](#sdk-integrations)
+3. [SDK integrations](#sdk-integrations)
    1. [LiveKit](#livekit)
-   1. [Twilio Video](#twilio-video)
-   1. [Mediasoup](#mediasoup)
-   1. [Janus](#janus)
-   1. [Vonage](#vonage)
-5. [Browser support](#browser-support)
+   2. [Twilio Video](#twilio-video)
+   3. [Mediasoup](#mediasoup)
+   4. [Janus](#janus)
+   5. [Vonage](#vonage)
+4. [Browser support](#browser-support)
 5. [License](#license)
 
 ## Install
@@ -177,8 +177,8 @@ const room = new Room(roomOptions)
 peerMetrics.addSdkIntegration({
 	livekit: {
         room: room, // mandatory, the livekit client Room instance
-        serverId: '', // string, mandatory, an ID to indentify the SFU server the user connects to
-        serverName: '' // string, optional, a more readable name for this server
+        serverId: '', // string, optional, an ID to indentify the SFU server the user connects to (default: livekit-sfu-server)
+        serverName: '' // string, optional, a more readable name for this server (default: LiveKit SFU Server)
     }
 })
 ```
@@ -216,8 +216,8 @@ let device = new mediasoupClient.Device({
 peerMetrics.addSdkIntegration({
 	mediasoup: {
         device: device, // mandatory, the mediasoupClient.Device() instance
-        serverId: '', // string, mandatory, an ID to indentify the SFU server the user connects to
-        serverName: '' // string, optional, a more readable name for this server
+        serverId: '', // string, optional, an ID to indentify the SFU server the user connects to (default: mediasoup-sfu-server)
+        serverName: '' // string, optional, a more readable name for this server (default: MediaSoup SFU Server)
     }
 })
 ```
@@ -238,8 +238,8 @@ let janus = new Janus({
                 peerMetrics.addSdkIntegration({
 					janus: {
                         plugin: pluginHandle, // mandatory
-                        serverId: '', // string, mandatory, an ID for this SFU server
-                        serverName: '' // string, optional, a more readable name for this server
+                        serverId: '', // string, optional, an ID for this SFU server (default: janus-sfu-server)
+                        serverName: '' // string, optional, a more readable name for this server (default: Janus SFU Server)
                     }
                 })
 

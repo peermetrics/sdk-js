@@ -25,15 +25,13 @@ export default class SdkIntegration extends EventEmitter {
     addMediaSoupIntegration(options) {
         if (!options) return
 
-        let { device, serverId, serverName } = options
+        let { device, serverId = 'mediasoup-sfu-server', serverName = 'MediaSoup SFU Server' } = options
         // check if the user sent the right device instance
         if (!device || !device.observer) {
             throw new Error("For integrating with MediaSoup, you need to send an instace of mediasoupClient.Device().")
         }
 
-        if (!serverId) {
-            throw new Error("For integrating with MediaSoup, you need to send a serverId as argument.")
-        }
+        serverId = this.checkServerId(serverId)
 
         serverName = this.checkServerName(serverName)
 
@@ -56,16 +54,15 @@ export default class SdkIntegration extends EventEmitter {
     addJanusIntegration(options) {
         if (!options) return
 
-        let { plugin, serverId, serverName } = options
+        let { plugin, serverId = 'janus-sfu-server', serverName = 'Janus SFU Server' } = options
+
         // check if the user sent the right plugin instance
         if (!plugin || typeof plugin.webrtcStuff !== 'object') {
             throw new Error("For integrating with Janus, you need to send an instace of plugin after calling .attach().")
         }
 
-        if (!serverId) {
-            throw new Error("For integrating with Janus, you need to send a serverId as argument.")
-        }
-        
+        serverId = this.checkServerId(serverId)
+
         serverName = this.checkServerName(serverName)
 
         // if the pc is already attached. should not happen
@@ -104,16 +101,14 @@ export default class SdkIntegration extends EventEmitter {
     addLivekitIntegration(options) {
         if (!options) return
 
-        let { room, serverId, serverName } = options
+        let { room, serverId = 'livekit-sfu-server', serverName = 'LiveKit SFU Server' } = options
 
         // check if the user sent the right room instance
         if (!room || typeof room.engine !== 'object') {
             throw new Error("For integrating with LiveKit, you need to send an instace of the room as soon as creating it.")
         }
 
-        if (!serverId) {
-            throw new Error("For integrating with LiveKit, you need to send a serverId as argument.")
-        }
+        serverId = this.checkServerId(serverId)
 
         serverName = this.checkServerName(serverName)
 
@@ -123,14 +118,16 @@ export default class SdkIntegration extends EventEmitter {
                 pc: publiser.pc,
                 peerId: serverId,
                 peerName: serverName,
-                isSfu: true
+                isSfu: true,
+                remote: true
             })
 
             this.emit('newConnection', {
                 pc: subscriber.pc,
                 peerId: serverId,
                 peerName: serverName,
-                isSfu: true
+                isSfu: true,
+                remote: true
             })
         })
 
@@ -151,10 +148,12 @@ export default class SdkIntegration extends EventEmitter {
             this.emit('newConnection', {
                 pc: pcs._peerConnection._peerConnection,
                 peerId: 'twilio-sfu-server',
-                peerName: 'Twilio SFU Server'
+                peerName: 'Twilio SFU Server',
+                isSfu: true,
+                remote: true
             })
         })
-        
+
         this.webrtcSDK = 'twilioVideo'
         this.foundIntegration = true
     }
@@ -178,6 +177,21 @@ export default class SdkIntegration extends EventEmitter {
 
         this.webrtcSDK = 'vonage'
         this.foundIntegration = true
+    }
+
+    /**
+     * Checks if the serverId is valid
+     * @param  {string} serverId [description]
+     * @return {string}          [description]
+     */
+    private checkServerId (serverId: string): string {
+        if (typeof serverId !== 'string') {
+            throw new Error("The serverId must be a string")
+        } else if (serverId.length > CONSTRAINTS.peer.idLength) {
+            throw new Error(`The serverId must be no longer than ${CONSTRAINTS.peer.idLength} characters.`)
+        }
+
+        return serverId
     }
 
     /**

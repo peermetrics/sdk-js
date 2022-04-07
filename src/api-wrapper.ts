@@ -256,9 +256,10 @@ export class ApiWrapper {
   }
 
   sendTrackEvent (data) {
-    return Promise.resolve()
+    const method = data.event === 'ontrack' ? 'post' : 'put'
     return this.makeRequest({
       path: urlsMap['track'],
+      method: method,
       data: data
     })
   }
