@@ -1,6 +1,10 @@
 
 export * from './api'
 
+declare global {
+    interface Window { PeerMetricsOptions: any; }
+}
+
 export interface PageEvents {
     pageVisibility: boolean,
     // fullScreen: boolean
@@ -15,7 +19,38 @@ export interface DefaultOptions {
     pageEvents?: PageEvents
 }
 
-export interface PeerMetricsConstructor extends DefaultOptions {
+interface MediaSoupIntegration {
+    device: any
+    serverId: string
+    serverName?: string
+}
+
+interface JanusIntegrationInterface {
+    plugin: any
+    serverId: string
+    serverName?: string
+}
+
+interface LiveKitIntegrationInterface {
+    room: any
+    serverId: string
+    serverName?: string
+}
+
+interface TwilioVideoIntegrationInterface {
+    room: any
+}
+
+export interface SdkIntegrationInterface {
+    // sdk
+    mediasoup?: MediaSoupIntegration,
+    janus?: JanusIntegrationInterface,
+    livekit?: LiveKitIntegrationInterface,
+    twilioVideo?: TwilioVideoIntegrationInterface
+    vonage?: boolean
+}
+
+export interface PeerMetricsConstructor extends DefaultOptions, SdkIntegrationInterface {
     apiKey: string,
     userId: string,
     userName?: string,
@@ -25,18 +60,24 @@ export interface PeerMetricsConstructor extends DefaultOptions {
     meta?: object
 }
 
+export type WebrtcSDKs = '' | 'mediasoup' | 'jitsi' | 'janus' | 'livekit' | 'twilioVideo' | 'vonage'
+
 export interface SessionData {
     platform: object,
     constraints: object,
     devices: object,
     appVersion: string,
-    meta: object
+    meta: object,
+    webrtcSdk: string
 }
 
-export interface AddPeerOptions {
+export interface AddConnectionOptions {
     peerId: string,
-    peerName: string,
     pc: RTCPeerConnection,
+    connectionId?: string,
+    remote?: boolean,
+    peerName?: string,
+    isSfu?: boolean
 }
 
 export interface AddEventOptions extends Object {

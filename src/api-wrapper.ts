@@ -3,8 +3,8 @@ import wretch from 'wretch'
 import {log} from './utils'
 
 import type {User} from './user'
-import type {ApiInitializeData, MakeRequest, ConnectionEventData} from './types'
-import type {Wretcher, ResponseChain} from 'wretch'
+import type { ApiInitializeData, MakeRequest, ConnectionEventData, SessionData } from './types'
+import type {Wretcher} from 'wretch'
 
 let externalApi: Wretcher
 
@@ -38,7 +38,8 @@ let urlsMap = {
   'events-browser': '/events/browser',
   'connection': '/connection',
   'batch-connection': '/connection/batch',
-  'stats': '/stats'
+  'stats': '/stats',
+  'track': '/tracks'
 }
 
 export class ApiWrapper {
@@ -115,7 +116,7 @@ export class ApiWrapper {
     })
   }
 
-  createSession (data) {
+  createSession(data) {
     return this.makeRequest({
       path: urlsMap['session'],
       data: data
@@ -177,10 +178,6 @@ export class ApiWrapper {
 
   sendConnectionEvent (data: ConnectionEventData) {
     if (this.batchConnectionEvents === false) {
-      if (this.mockRequests && data.eventName === 'addPeer') {
-        return {peer_id: data.peerId}
-      }
-
       return this._sendConnectionEvent(data)
     }
 
@@ -258,6 +255,15 @@ export class ApiWrapper {
     })
   }
 
+  sendTrackEvent (data) {
+    const method = data.event === 'ontrack' ? 'post' : 'put'
+    return this.makeRequest({
+      path: urlsMap['track'],
+      method: method,
+      data: data
+    })
+  }
+
   /**
    * This is a special method because it uses beacons instead of fetch
    */
@@ -281,7 +287,7 @@ export class ApiWrapper {
     // we just need the path, the base url is set at initialization
     let {path, timestamp, data} = options
 
-    if (data.eventName === 'addPeer') {
+    if (path === '/initialize' && start === 0) {
       start = Date.now()
     }
 
@@ -296,8 +302,15 @@ export class ApiWrapper {
     // if we mock requests, resolve immediately
     if (this.mockRequests) {
       return new Promise((resolve) => {
+        let response = {}
+        if (data.eventName === 'addConnection') {
+          response = {
+            // @ts-ignore
+            peer_id: data.peerId
+          }
+        }
         // mock a request that takes anywhere between 0 and 1000ms
-        setTimeout(() => resolve({}), Math.floor(Math.random() * 1000))
+        setTimeout(() => resolve(response), Math.floor(Math.random() * 1000))
       })
     }
 

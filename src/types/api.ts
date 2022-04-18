@@ -23,7 +23,10 @@ export interface MakeRequest {
 export interface ConnectionEventData {
     eventName: string,
     peerId: string,
+    connectionState?: string,
+    connectionId?: string,
     peerName?: string,
     timestamp?: null | DOMHighResTimeStamp,
-    data?: null | RequestData
+    data?: null | RequestData,
+    isSfu?: boolean
 }
