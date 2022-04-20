@@ -52,10 +52,10 @@ let peerMetrics = new PeerMetrics({
 // initialize the sdk
 await peerMetrics.initialize()
 ```
-In order to start tracking a connection, use the `.addPeer()` method:
+In order to start tracking a connection, use the `.addConnection()` method:
 ```js
 let pc1 = new RTCPeerConnection({...})
-peerMetrics.addPeer({
+await peerMetrics.addConnection({
     pc: pc1,
     peerId: '1' # any string that helps you identify this peer
 })
@@ -110,22 +110,42 @@ Used to initialize the SDK. Returns a promise that rejects if any problems were 
 Used to integrate with different SDKs. See [here](#sdk-integrations) list for options.
 
 #### `.addConnection(options)`
-Adds a peer to the watch list.
+Adds a connection to the watch list.
 `options`
 
   - `pc`: the `RTCPeerConnection` instance
   - `peerId`: String a unique Id to identify this peer
 Monitoring of a peer will automatically end when the connection is closed.
 
+#### `.removeConnection(options)`
+
+Stop listening for events on a specific connection.
+
+`options` can be one of two options:
+
+- `connectionId`: the one returned after calling `.addConnection()`
+
+OR
+
+- `peerId`: the ID for a peer
+- `pc`: the `RTCPeerConnection` instance
+
 #### `.removePeer(peerId)`
 
-Stop listening for events/stats for this peer
+Stop listening for events/stats on all the connections for this peer
 
 #### `.addEvent(object)`
 
-Add a custom event for this participant. eg: `{eventName: 'open settings', description: 'user opened settings dialog'}`.
+Add a custom event for this participant. Example: 
 
-`object` doesn't require a specific structure, but if the `eventName` attribute is present, it will be used as a event title on the timeline.
+```js
+{
+    eventName: 'open settings',
+    description: 'user opened settings dialog'
+}
+```
+
+`object` doesn't require a specific structure, but if the `eventName` attribute is present, it will be displayed on the event timeline in your dashboard.
 
 This helps you get a better context of the actions the user took that might have impacted the WebRTC experience.
 
@@ -161,7 +181,7 @@ The `options` object differs depending on the integration.
 
 
 
-List of SDKs that `PeerMetrics` supports:
+### List of SDKs that `PeerMetrics` supports:
 
 ### LiveKit
 
@@ -199,8 +219,6 @@ Video.connect('$TOKEN', { name: 'room-name' }).then(room => {
 })
 
 ```
-
-
 
 ### Mediasoup
 
@@ -252,7 +270,7 @@ let janus = new Janus({
 
 ### Vonage
 
-To integrate with [Vonage](https://www.vonage.com/) SDK (previously Tokbox) you will need to load `PeerMetrics` before the them. For example:
+To integrate with [Vonage](https://www.vonage.com/) SDK (previously Tokbox) you will need to load `PeerMetrics` before them. For example:
 
 ```html
 <!-- First we need to set a special global option -->
@@ -288,7 +306,7 @@ To integrate with [Vonage](https://www.vonage.com/) SDK (previously Tokbox) you 
 
 ## Browser support
 
-Right now, the SDK has been tested and is compatible with the latest version of Chromium based browsers (Chrome, Edge, Brave, etc), Firefox and Safari.
+Right now, the SDK is compatible with the latest version of Chromium based browsers (Chrome, Edge, Brave, etc), Firefox and Safari.
 
 
 
