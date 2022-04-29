@@ -427,9 +427,13 @@ export class PeerMetrics {
   }
 
   private addPageEventListeners (options: PageEvents) {
+    window.addEventListener('beforeunload', () => {
+      this.apiWrapper.sendLeaveEvent('beforeunload')
+    })
+
     window.addEventListener('unload', () => {
-      this.apiWrapper.sendLeaveEvent('unload')
-    }, false)
+      this.apiWrapper.sendBeaconEvent('unload')
+    })
 
     // tab focus/unfocus
     if (options.pageVisibility && window.document) {

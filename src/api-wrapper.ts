@@ -268,17 +268,28 @@ export class ApiWrapper {
    * This is a special method because it uses beacons instead of fetch
    */
   sendLeaveEvent (event) {
-    if (!navigator.sendBeacon) return
-
-    let url = this._createUrl(urlsMap['events-browser'])
+    let path = urlsMap['events-browser']
     let data = JSON.stringify({
       token: token,
       eventName: event
     })
 
     if (this.mockRequests) {
-      log('request', Date.now() - start, urlsMap['events-browser'], data)
-    } else {
+      return log('request', Date.now() - start, urlsMap['events-browser'], data)
+    }
+
+    externalApi.url(path).options({keepalive: true}).post(data)
+  }
+
+  sendBeaconEvent (event) {
+    let url = this._createUrl(urlsMap['events-browser'])
+    let data = JSON.stringify({
+      token: token,
+      eventName: event
+    })
+
+    if (navigator.sendBeacon) {
+      // send a beacon event
       navigator.sendBeacon(url, data)
     }
   }
