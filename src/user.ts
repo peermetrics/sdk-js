@@ -1,6 +1,11 @@
 
 import UAParse from 'ua-parser-js'
 
+interface ConstructorOptions {
+  userId: string,
+  userName?: string
+}
+
 /**
  * We gather the info for the current user here
  */
@@ -12,13 +17,13 @@ export class User {
   public constraints: MediaTrackSupportedConstraints = {}
   public devices: object[] = []
 
-  constructor (options) {
-    if (!options.userId) {
+  constructor ({userId, userName}: ConstructorOptions) {
+    if (!userId) {
       throw new Error('missing argument userId')
     }
 
-    this.userId = options.userId
-    this.userName = options.userName
+    this.userId = userId
+    this.userName = userName
   }
 
   /**

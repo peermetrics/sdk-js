@@ -83,3 +83,10 @@ export interface AddConnectionOptions {
 export interface AddEventOptions extends Object {
     eventName?: string
 }
+
+export interface PeersToMonitor {
+    [id: string]: {
+        id: string,
+        connections: string[]
+    }
+}

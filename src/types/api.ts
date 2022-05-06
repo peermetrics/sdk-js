@@ -17,7 +17,8 @@ export interface MakeRequest {
     path: string,
     data: RequestData,
     timestamp?: DOMHighResTimeStamp,
-    method?: 'post' | 'put'
+    method?: 'post' | 'put',
+    retry?: boolean
 }
 
 export interface ConnectionEventData {

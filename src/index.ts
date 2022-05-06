@@ -16,14 +16,15 @@ import type {
   AddConnectionOptions,
   SessionData,
   PageEvents,
-  AddEventOptions
+  AddEventOptions,
+  PeersToMonitor
 } from './types/index'
 
 /**
  * Used to keep track of peers
  * @type {Object}
  */
-let peersToMonitor = {}
+let peersToMonitor = {} as PeersToMonitor
 
 /**
  * Used to keep track of connection IDs: the ones from WebrtcStats and the ones from the DB
@@ -271,14 +272,20 @@ export class PeerMetrics {
       }
     }
 
+    if (options.peerId == this.user.userId) {
+      throw new Error('peerId can\'t be the same as the id used to initialize PeerMetrics.')
+    }
+
     log('addConnection', options)
 
+    let connectionId
     try {
       // add the peer to webrtcStats now, so we don't miss any events
-      let {connectionId} = await this.webrtcStats.addConnection(options)
+      let statsResponse = await this.webrtcStats.addConnection(options)
+      connectionId = statsResponse.connectionId
 
       // make the request to add the peer to DB
-      const response = await this.apiWrapper.sendConnectionEvent({
+      let response = await this.apiWrapper.sendConnectionEvent({
         eventName: 'addConnection',
         peerId: options.peerId,
         peerName: options.peerName,
@@ -291,9 +298,13 @@ export class PeerMetrics {
       }
 
       // we'll receive a new peer id, use peersToMonitor to make the connection between them
-      peersToMonitor[options.peerId] = response.peer_id
+      peersToMonitor[options.peerId] = {
+        id: response.peer_id,
+        connections: []
+      }
 
-      monitoredConnections[connectionId] = response.connection_id || connectionId
+      monitoredConnections[connectionId] = response.connection_id
+      peersToMonitor[options.peerId].connections.push(response.connection_id)
 
       // all the events that we captured while waiting for 'addConnection' are here
       // send them to the server
@@ -302,8 +313,13 @@ export class PeerMetrics {
       })
       // clear the queue
       eventQueue.length = 0
+
+      return {
+        connectionId: monitoredConnections[connectionId]
+      }
     } catch (e) {
       log(e)
+      this.webrtcStats.removeConnection({connectionId})
       throw e
     }
   }
@@ -322,8 +338,27 @@ export class PeerMetrics {
       throw new Error('By not sending a connectionId, you need to send a peerId and a pc (RTCPeerConnection instance)')
     }
 
-    connectionId = this.webrtcStats.removeConnection(options)
+    // if we've received a connectionId, we need to find the internal one
+    // we're using with WebrtcStats
+    if (connectionId) {
+      const internalConnectionId = Object.keys(monitoredConnections).find((key) => monitoredConnections[key] === connectionId)
 
+      if (!internalConnectionId) {
+        throw new Error(`Could not find a connection with this id ${connectionId}`)
+      }
+
+      // rewrite options with the new connectionId
+      options = {connectionId: internalConnectionId}
+    }
+
+    let {connectionId: internalId} = this.webrtcStats.removeConnection(options)
+    if (peerId) {
+      connectionId = Object.keys(monitoredConnections).find((key) => monitoredConnections[key] === internalId)
+    } else if (connectionId) {
+      peerId = Object.values(peersToMonitor).find((peer) => peer.connections.includes(connectionId)).id
+    }
+
+    // we need both connectionId and peerId for this request
     await this.apiWrapper.sendConnectionEvent({
       eventName: 'removeConnection',
       connectionId,
@@ -535,7 +570,7 @@ export class PeerMetrics {
     if (ev.peerId) {
       if (peersToMonitor[ev.peerId]) {
         // update with the new peer
-        ev.peerId = peersToMonitor[ev.peerId]
+        ev.peerId = peersToMonitor[ev.peerId].id
       } else {
         // add this special flag to signal that we've manually delayed sending this request
         ev.delayed = true

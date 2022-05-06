@@ -251,6 +251,7 @@ export class ApiWrapper {
   sendWebrtcStats (data) {
     return this.makeRequest({
       path: urlsMap['stats'],
+      retry: true,
       data: data
     })
   }
@@ -260,6 +261,7 @@ export class ApiWrapper {
     return this.makeRequest({
       path: urlsMap['track'],
       method: method,
+      retry: true,
       data: data
     })
   }
@@ -296,7 +298,7 @@ export class ApiWrapper {
 
   private async makeRequest (options: MakeRequest) {
     // we just need the path, the base url is set at initialization
-    let {path, timestamp, data} = options
+    let {path, timestamp, data, retry = false} = options
 
     if (path === '/initialize' && start === 0) {
       start = Date.now()
@@ -358,7 +360,12 @@ export class ApiWrapper {
       .setTimeout(REQUEST_TIMEOUT)
       .json(this._handleResponse)
       .catch((response) => {
-        return this._handleFailedRequest({response, timestamp, options})
+        // if we should retry the request
+        if (retry) {
+          return this._handleFailedRequest({response, timestamp, options})
+        }
+
+        throw response
       })
   }
 
