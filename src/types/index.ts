@@ -48,6 +48,7 @@ export interface SdkIntegrationInterface {
     livekit?: LiveKitIntegrationInterface,
     twilioVideo?: TwilioVideoIntegrationInterface
     vonage?: boolean
+    agora?: boolean
 }
 
 export interface PeerMetricsConstructor extends DefaultOptions, SdkIntegrationInterface {
@@ -60,7 +61,7 @@ export interface PeerMetricsConstructor extends DefaultOptions, SdkIntegrationIn
     meta?: object
 }
 
-export type WebrtcSDKs = '' | 'mediasoup' | 'jitsi' | 'janus' | 'livekit' | 'twilioVideo' | 'vonage'
+export type WebrtcSDKs = '' | 'mediasoup' | 'jitsi' | 'janus' | 'livekit' | 'twilioVideo' | 'vonage' | 'agora'
 
 export interface SessionData {
     platform: object,

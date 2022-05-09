@@ -18,8 +18,11 @@ Peer metrics is a service that helps you collect events and metrics for your `We
    3. [Mediasoup](#mediasoup)
    4. [Janus](#janus)
    5. [Vonage](#vonage)
+   6. [Agora](#agora)
 4. [Browser support](#browser-support)
 5. [License](#license)
+
+
 
 ## Install
 
@@ -27,6 +30,12 @@ To use the sdk you can install the package through npm:
 
 ```sh
 npm install @peermetrics/sdk
+```
+
+Then
+
+```js
+import { PeerMetrics } from '@peermetrics/sdk'
 ```
 
 Or load it directly in the browser:
@@ -270,7 +279,7 @@ let janus = new Janus({
 
 ### Vonage
 
-To integrate with [Vonage](https://www.vonage.com/) SDK (previously Tokbox) you will need to load `PeerMetrics` before them. For example:
+To integrate with [Vonage](https://www.vonage.com/) SDK (previously Tokbox) you will need to load `PeerMetrics` before it. For example:
 
 ```html
 <!-- First we need to set a special global option -->
@@ -299,7 +308,54 @@ To integrate with [Vonage](https://www.vonage.com/) SDK (previously Tokbox) you 
 
 <!-- Load the OpenTok sdk -->
 <script src="https://static.opentok.com/v2/js/opentok.min.js"></script>
+```
 
+### Agora
+
+To integrate with [Agora](https://www.agora.io/) SDK you will need to load `PeerMetrics` before it. For example:
+
+```html
+<!-- First we need to set a special global option -->
+<script>
+    var PeerMetricsOptions = {
+        wrapPeerConnection: true
+    }
+</script>
+
+<!-- Load the sdk -->
+<script src="//cdn.peermetrics.io/js/sdk/peermetrics.min.js"></script>
+
+<!-- Then setup PeerMetrics. This can alse be done later, but before calling OT.initSession() -->
+<script>
+    (async () => {
+        let stats = new PeerMetrics({
+            ...
+        })
+        await stats.initialize()
+
+        stats.addSdkIntegration({
+            agora: true
+        })
+    })()
+</script>
+
+<!-- Load the Agora sdk -->
+<script src="https://download.agora.io/sdk/release/AgoraRTC_N.js"></script>
+```
+
+Or, if you are using a bundler:
+
+```js
+import PeerMetrics from '@peermetrics/sdk'
+// call wrapPeerConnection as soon as possible
+PeerMetrics.wrapPeerConnection()
+
+let stats = new PeerMetrics({...})
+await stats.initialize()
+
+stats.addSdkIntegration({
+    agora: true
+})
 ```
 
 

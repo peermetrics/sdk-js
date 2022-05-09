@@ -225,6 +225,24 @@ export class PeerMetrics {
     this._initializeStatsModule(response.getStatsInterval)
   }
 
+  /**
+   * Wrapp native RTCPeerConnection class
+   * @return {boolean} if the wrapping was successful
+   */
+  static wrapPeerConnection(): boolean {
+    if (!window) {
+      throw new Error('Could not find gloal window. This method should be called in a browser context.')
+    }
+
+    peerConnectionEventEmitter = wrapPeerConnection(window)
+    if (!peerConnectionEventEmitter) {
+      log('Could not wrap window.RTCPeerConnection')
+      return false
+    }
+
+    return true
+  }
+
   async addPeer (options: AddConnectionOptions) {
     console.warn('The addPeer() method has been deprecated, please use addConnection() instead')
     return this.addConnection(options)
@@ -252,27 +270,31 @@ export class PeerMetrics {
       throw new Error('Argument for addConnection() should be an object.')
     }
 
-    if (!options.pc) {
+    let {pc, peerId, peerName, isSfu} = options
+    // make the peerId a string
+    peerId = String(peerId)
+
+    if (!pc) {
       throw new Error('Missing argument pc: RTCPeerConnection.')
     }
 
-    if (!options.peerId) {
+    if (!peerId) {
       throw new Error('Missing argument peerId.')
     }
 
     // validate the peerName if it exists
-    if (options.peerName) {
-      if (typeof options.peerName !== 'string') {
+    if (peerName) {
+      if (typeof peerName !== 'string') {
         throw new Error('peerName should be a string')
       }
 
       // if the name is too long, just snip it
-      if (options.peerName.length > CONSTRAINTS.peer.nameLength) {
-        options.peerName = options.peerName.slice(CONSTRAINTS.peer.nameLength)
+      if (peerName.length > CONSTRAINTS.peer.nameLength) {
+        peerName = peerName.slice(CONSTRAINTS.peer.nameLength)
       }
     }
 
-    if (options.peerId == this.user.userId) {
+    if (peerId === this.user.userId) {
       throw new Error('peerId can\'t be the same as the id used to initialize PeerMetrics.')
     }
 
@@ -281,16 +303,16 @@ export class PeerMetrics {
     let connectionId
     try {
       // add the peer to webrtcStats now, so we don't miss any events
-      let statsResponse = await this.webrtcStats.addConnection(options)
+      let statsResponse = await this.webrtcStats.addConnection({peerId, pc})
       connectionId = statsResponse.connectionId
 
       // make the request to add the peer to DB
       let response = await this.apiWrapper.sendConnectionEvent({
         eventName: 'addConnection',
-        peerId: options.peerId,
-        peerName: options.peerName,
-        connectionState: options.pc.connectionState,
-        isSfu: !!options.isSfu
+        peerId: peerId,
+        peerName: peerName,
+        connectionState: pc.connectionState,
+        isSfu: !!isSfu
       })
 
       if (!response) {
@@ -298,13 +320,13 @@ export class PeerMetrics {
       }
 
       // we'll receive a new peer id, use peersToMonitor to make the connection between them
-      peersToMonitor[options.peerId] = {
+      peersToMonitor[peerId] = {
         id: response.peer_id,
         connections: []
       }
 
       monitoredConnections[connectionId] = response.connection_id
-      peersToMonitor[options.peerId].connections.push(response.connection_id)
+      peersToMonitor[peerId].connections.push(response.connection_id)
 
       // all the events that we captured while waiting for 'addConnection' are here
       // send them to the server

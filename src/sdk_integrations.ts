@@ -11,13 +11,14 @@ export default class SdkIntegration extends EventEmitter {
     foundIntegration: boolean = false
     webrtcSDK: WebrtcSDKs
 
-    addIntegration(options: SdkIntegrationInterface, peerConnectionEventEmitter: null | EventEmitter) {
+    addIntegration(options: SdkIntegrationInterface, peerConnectionEventEmitter: null | EventEmitter): boolean {
 
         this.addMediaSoupIntegration(options.mediasoup)
         this.addJanusIntegration(options.janus)
         this.addLivekitIntegration(options.livekit)
         this.addTwilioVideoIntegration(options.twilioVideo)
         this.addVonageIntegration(options.vonage, peerConnectionEventEmitter)
+        this.addAgoraIntegration(options.agora, peerConnectionEventEmitter)
 
         return this.foundIntegration
     }
@@ -176,6 +177,27 @@ export default class SdkIntegration extends EventEmitter {
         })
 
         this.webrtcSDK = 'vonage'
+        this.foundIntegration = true
+    }
+
+    addAgoraIntegration(agora: boolean, peerConnectionEventEmitter: EventEmitter) {
+        if (!agora) return
+
+        if (!peerConnectionEventEmitter) {
+            throw new Error("Could not integrate with agora. Please make sure you set PeerMetricsOptions.wrapPeerConnection before loading the PeerMetrics script.");            
+        }
+
+        peerConnectionEventEmitter.on('newRTCPeerconnection', (pc) => {
+            this.emit('newConnection', {
+                pc: pc,
+                peerId: 'agora-sfu-server',
+                peerName: 'Agora SFU server',
+                isSfu: true,
+                remote: true
+            })
+        })
+
+        this.webrtcSDK = 'agora'
         this.foundIntegration = true
     }
 
