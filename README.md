@@ -346,7 +346,7 @@ To integrate with [Agora](https://www.agora.io/) SDK you will need to load `Peer
 Or, if you are using a bundler:
 
 ```js
-import PeerMetrics from '@peermetrics/sdk'
+import { PeerMetrics } from '@peermetrics/sdk'
 // call wrapPeerConnection as soon as possible
 PeerMetrics.wrapPeerConnection()
 
