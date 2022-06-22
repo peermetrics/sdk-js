@@ -161,6 +161,14 @@ export class PeerMetrics {
     this.pageEvents = options.pageEvents
 
     enableDebug(!!options.debug)
+
+    if (options.wrapPeerConnection) {
+      if (peerConnectionEventEmitter) {
+        console.warn('RTCPeerConnection already wrapped')
+      } else {
+        peerConnectionEventEmitter = wrapPeerConnection(window)
+      }
+    }
   }
 
   /**
@@ -376,6 +384,14 @@ export class PeerMetrics {
     sdkIntegration.on('newConnection', (options) => {
       this.addConnection(options)
     })
+
+    // if we have a pion integration, it's safe to wrap the peer connection later
+  if (options.pion) {
+      // if we haven't already wrapped
+      if (!peerConnectionEventEmitter) {
+        peerConnectionEventEmitter = wrapPeerConnection(window)
+      }
+    }
 
     sdkIntegration.addIntegration(options, peerConnectionEventEmitter)
 

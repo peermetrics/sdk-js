@@ -41,27 +41,33 @@ interface TwilioVideoIntegrationInterface {
     room: any
 }
 
+export interface PionIntegrationInterface {
+    serverId?: string
+    serverName?: string
+}
+
 export interface SdkIntegrationInterface {
-    // sdk
     mediasoup?: MediaSoupIntegration,
     janus?: JanusIntegrationInterface,
     livekit?: LiveKitIntegrationInterface,
     twilioVideo?: TwilioVideoIntegrationInterface
     vonage?: boolean
     agora?: boolean
+    pion?: boolean | PionIntegrationInterface
 }
 
-export interface PeerMetricsConstructor extends DefaultOptions, SdkIntegrationInterface {
+export interface PeerMetricsConstructor extends DefaultOptions {
     apiKey: string,
     userId: string,
     userName?: string,
     conferenceId: string,
     conferenceName?: string,
     appVersion?: string,
-    meta?: object
+    meta?: object,
+    wrapPeerConnection?: boolean
 }
 
-export type WebrtcSDKs = '' | 'mediasoup' | 'jitsi' | 'janus' | 'livekit' | 'twilioVideo' | 'vonage' | 'agora'
+export type WebrtcSDKs = '' | 'mediasoup' | 'jitsi' | 'janus' | 'livekit' | 'twilioVideo' | 'vonage' | 'agora' | 'pion'
 
 export interface SessionData {
     platform: object,

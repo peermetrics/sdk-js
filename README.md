@@ -19,6 +19,8 @@ Peer metrics is a service that helps you collect events and metrics for your `We
    4. [Janus](#janus)
    5. [Vonage](#vonage)
    6. [Agora](#agora)
+   7. [Pion](#pion)
+   8. [SimplePeer](#simplepeer)
 4. [Browser support](#browser-support)
 5. [License](#license)
 
@@ -124,7 +126,7 @@ Adds a connection to the watch list.
 
   - `pc`: the `RTCPeerConnection` instance
   - `peerId`: String a unique Id to identify this peer
-Monitoring of a peer will automatically end when the connection is closed.
+  Monitoring of a peer will automatically end when the connection is closed.
 
 #### `.removeConnection(options)`
 
@@ -251,7 +253,16 @@ peerMetrics.addSdkIntegration({
 
 ### Janus
 
-If you are using the [Janus](https://janus.conf.meetecho.com/docs/JS.html) javascript sdk to create connections to Janus server, you can integrate by sending the plugin handler that result from calling `.attach()`. For example:
+If you are using the [Janus](https://janus.conf.meetecho.com/docs/JS.html) javascript sdk to create connections to Janus server, you can integrate by sending the plugin handler that result from calling `.attach()`. First thing:
+
+```js
+let peerMetrics = new PeerMetrics({
+    ...
+})
+await peerMetrics.initialize()
+```
+
+And then:
 
 ```js
 let janus = new Janus({
@@ -295,12 +306,12 @@ To integrate with [Vonage](https://www.vonage.com/) SDK (previously Tokbox) you 
 <!-- Then setup PeerMetrics. This can alse be done later, but before calling OT.initSession() -->
 <script>
     (async () => {
-        let stats = new PeerMetrics({
+        let peerMetrics = new PeerMetrics({
             ...
         })
-        await stats.initialize()
+        await peerMetrics.initialize()
 
-        stats.addSdkIntegration({
+        peerMetrics.addSdkIntegration({
             vonage: true
         })
     })()
@@ -328,12 +339,12 @@ To integrate with [Agora](https://www.agora.io/) SDK you will need to load `Peer
 <!-- Then setup PeerMetrics. This can alse be done later, but before calling OT.initSession() -->
 <script>
     (async () => {
-        let stats = new PeerMetrics({
+        let peerMetrics = new PeerMetrics({
             ...
         })
-        await stats.initialize()
+        await peerMetrics.initialize()
 
-        stats.addSdkIntegration({
+        peerMetrics.addSdkIntegration({
             agora: true
         })
     })()
@@ -350,11 +361,62 @@ import { PeerMetrics } from '@peermetrics/sdk'
 // call wrapPeerConnection as soon as possible
 PeerMetrics.wrapPeerConnection()
 
-let stats = new PeerMetrics({...})
-await stats.initialize()
+let peerMetrics = new PeerMetrics({...})
+await peerMetrics.initialize()
 
-stats.addSdkIntegration({
+peerMetrics.addSdkIntegration({
     agora: true
+})
+```
+
+### Pion
+
+Integrating with Pion is dead simple. Just initialize peer metrics first and you are good to go:
+
+```js
+import { PeerMetrics } from '@peermetrics/sdk'
+import { Client, LocalStream, RemoteStream } from 'ion-sdk-js';
+import { IonSFUJSONRPCSignal } from 'ion-sdk-js/lib/signal/json-rpc-impl';
+
+let peerMetrics = new PeerMetrics({...})
+await peerMetrics.initialize()
+
+peerMetrics.addSdkIntegration({
+    pion: true
+})
+
+// then continue with the usual things
+const signal = new IonSFUJSONRPCSignal("wss://ion-sfu:7000/ws");
+const client = new Client(signal);
+signal.onopen = () => client.join("test session", "test uid")
+```
+
+You can pass additional details to `addSdkIntegration()` to better identify the SFU server the user is connecting to:
+
+```js
+peerMetrics.addSdkIntegration({
+    pion: {
+        serverId: 'pion-sfu-na',
+        serverName: 'Pion SFU North America'
+    }
+})
+```
+
+### SimplePeer
+
+To integrate with `SimplePeer` you would just need to pass the `RTCPeerConnection` to `PeerMetrics`. For example:
+
+```js
+var peer = new SimplePeer({
+    initiator: true,
+    config: iceServers,
+    stream: stream,
+    trickle: true
+})
+
+peerMetrics.addConnection({
+    pc: peer._pc,
+    peerId: peerId
 })
 ```
 

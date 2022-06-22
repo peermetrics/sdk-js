@@ -19,6 +19,7 @@ export default class SdkIntegration extends EventEmitter {
         this.addTwilioVideoIntegration(options.twilioVideo)
         this.addVonageIntegration(options.vonage, peerConnectionEventEmitter)
         this.addAgoraIntegration(options.agora, peerConnectionEventEmitter)
+        this.addPionIntegration(options.pion, peerConnectionEventEmitter)
 
         return this.foundIntegration
     }
@@ -199,6 +200,33 @@ export default class SdkIntegration extends EventEmitter {
 
         this.webrtcSDK = 'agora'
         this.foundIntegration = true
+    }
+
+    addPionIntegration (options: SdkIntegrationInterface['pion'], peerConnectionEventEmitter) {
+        if (!options) return
+
+        // if the user sent just a boolean, use the default values for server id/name
+        if (typeof options === 'boolean') {
+            options = {}
+        }
+
+        let { serverId = 'pion-sfu-server', serverName = 'Pion SFU server' } = options;
+
+        serverId = this.checkServerId(serverId);
+        serverName = this.checkServerName(serverName);
+
+        peerConnectionEventEmitter.on('newRTCPeerconnection', (pc) => {
+            this.emit('newConnection', {
+                pc: pc,
+                peerId: serverId,
+                peerName: serverName,
+                isSfu: true,
+                remote: true
+            })
+        })
+
+        this.webrtcSDK = 'pion';
+        this.foundIntegration = true;
     }
 
     /**
