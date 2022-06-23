@@ -386,7 +386,7 @@ export class PeerMetrics {
     })
 
     // if we have a pion integration, it's safe to wrap the peer connection later
-  if (options.pion) {
+    if (options.pion) {
       // if we haven't already wrapped
       if (!peerConnectionEventEmitter) {
         peerConnectionEventEmitter = wrapPeerConnection(window)

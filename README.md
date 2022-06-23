@@ -1,8 +1,8 @@
-# PeerMetrics sdk
+# PeerMetrics SDK
 
 <img src="https://img.shields.io/npm/v/@peermetrics/sdk">
 
-This is the repo for the `PeerMetrics` JS sdk. 
+This is the repo for the `PeerMetrics` JS SDK. 
 
 Peer metrics is a service that helps you collect events and metrics for your `WebRTC` connections. You can read more about the service on [peermetrics.io](https://peermetrics.io/).
 
@@ -94,7 +94,7 @@ let peerMetrics = new PeerMetrics({
     appVersion: '0.0.1', // String, optional
 
     // if the sdk can't be run on the other side of the call (for example a SFU) you can still collect some stats for that using this flag
-    remote: false, // Boolean, optional
+    remote: true, // Boolean, optional, Default: true
 
     // Object, optional: if you would like to save some additional info about this user
     // there is a limit of 5 attributes that can be added. only string, number, boolean supported as values
@@ -116,9 +116,13 @@ let peerMetrics = new PeerMetrics({
 
 Used to initialize the SDK. Returns a promise that rejects if any problems were encountered (for example invalid apiKey, over quota, etc)
 
+
+
 #### `.addSdkIntegration(options)`
 
 Used to integrate with different SDKs. See [here](#sdk-integrations) list for options.
+
+
 
 #### `.addConnection(options)`
 Adds a connection to the watch list.
@@ -126,7 +130,10 @@ Adds a connection to the watch list.
 
   - `pc`: the `RTCPeerConnection` instance
   - `peerId`: String a unique Id to identify this peer
-  Monitoring of a peer will automatically end when the connection is closed.
+
+**Note:** Monitoring of a peer will automatically end when the connection is closed.
+
+
 
 #### `.removeConnection(options)`
 
@@ -138,12 +145,15 @@ Stop listening for events on a specific connection.
 
 OR
 
-- `peerId`: the ID for a peer
 - `pc`: the `RTCPeerConnection` instance
+
+
 
 #### `.removePeer(peerId)`
 
 Stop listening for events/stats on all the connections for this peer
+
+
 
 #### `.addEvent(object)`
 
@@ -160,9 +170,13 @@ Add a custom event for this participant. Example:
 
 This helps you get a better context of the actions the user took that might have impacted the WebRTC experience.
 
+
+
 #### `.mute()`/`.unmute()`
 
 Save event that user muted/unmuted the microphone
+
+
 
 ## SDK integrations
 
@@ -371,12 +385,12 @@ peerMetrics.addSdkIntegration({
 
 ### Pion
 
-Integrating with Pion is dead simple. Just initialize peer metrics first and you are good to go:
+Integrating with Pion is dead simple. If for example you are using [ion sdk js](https://github.com/pion/ion-sdk-js), just initialize peer metrics first and you are good to go:
 
 ```js
-import { PeerMetrics } from '@peermetrics/sdk'
 import { Client, LocalStream, RemoteStream } from 'ion-sdk-js';
 import { IonSFUJSONRPCSignal } from 'ion-sdk-js/lib/signal/json-rpc-impl';
+import { PeerMetrics } from '@peermetrics/sdk'
 
 let peerMetrics = new PeerMetrics({...})
 await peerMetrics.initialize()
