@@ -1,6 +1,6 @@
 import {WebRTCStats} from '@peermetrics/webrtc-stats'
 
-import type { RemoveConnectionOptions } from '@peermetrics/webrtc-stats'
+// import type { RemoveConnectionOptions } from '@peermetrics/webrtc-stats'
 
 import {User} from './user'
 import { DEFAULT_OPTIONS, CONSTRAINTS } from "./constants";
@@ -20,6 +20,8 @@ import type {
   PeersToMonitor
 } from './types/index'
 
+export {PeerMetricsConstructor, AddConnectionOptions, AddEventOptions}
+
 /**
  * Used to keep track of peers
  * @type {Object}
@@ -35,7 +37,7 @@ let eventQueue = []
 
 let peerConnectionEventEmitter = null
 // if the user has provided an options object
-if (window && typeof window.PeerMetricsOptions === 'object') {
+if (typeof window !== "undefined" && typeof window.PeerMetricsOptions === 'object') {
   if (window.PeerMetricsOptions.wrapPeerConnection === true) {
     peerConnectionEventEmitter = wrapPeerConnection(window)
     if (!peerConnectionEventEmitter) {
@@ -48,7 +50,7 @@ export class PeerMetrics {
 
   private user: User
   private apiWrapper: ApiWrapper
-  private webrtcStats: WebRTCStats
+  private webrtcStats: typeof WebRTCStats
   private pageEvents: PageEvents
   private _options: PeerMetricsConstructor
   private _initialized: boolean = false
@@ -65,23 +67,6 @@ export class PeerMetrics {
     }
 
     options = {...DEFAULT_OPTIONS, ...options}
-
-    // check if browser
-    if (typeof window === 'undefined' || typeof navigator === 'undefined') {
-      throw new Error('The SDK is meant to be used in a browser.')
-    }
-
-    // check if webrtc compatible
-    let pc = window.RTCPeerConnection
-    let gum = navigator.mediaDevices.getUserMedia
-    if (!pc || !gum) {
-      throw new Error('This device doesn\'t seem to support RTCPeerConnection or getUserMedia')
-    }
-
-    // check if fetch is available
-    if (typeof window.fetch === 'undefined') {
-      throw new Error('This device doesn\'t seem to support the fetch API.')
-    }
 
     // validate options
     if (!options.apiKey) {
@@ -181,6 +166,23 @@ export class PeerMetrics {
     // if we are already initialized
     if (this._initialized) return
 
+    // check if browser
+    if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+      throw new Error('The SDK is meant to be used in a browser.')
+    }
+
+    // check if webrtc compatible
+    let pc = window.RTCPeerConnection
+    let gum = navigator.mediaDevices.getUserMedia
+    if (!pc || !gum) {
+      throw new Error('This device doesn\'t seem to support RTCPeerConnection or getUserMedia')
+    }
+
+    // check if fetch is available
+    if (typeof window.fetch === 'undefined') {
+      throw new Error('This device doesn\'t seem to support the fetch API.')
+    }
+
     try {
       // initialize the session
       // check if the apiKey is valid
@@ -234,11 +236,11 @@ export class PeerMetrics {
   }
 
   /**
-   * Wrapp native RTCPeerConnection class
+   * Wrap native RTCPeerConnection class
    * @return {boolean} if the wrapping was successful
    */
   static wrapPeerConnection(): boolean {
-    if (!window) {
+    if (typeof window === 'undefined') {
       throw new Error('Could not find gloal window. This method should be called in a browser context.')
     }
 
@@ -318,7 +320,7 @@ export class PeerMetrics {
   /**
    * Stop listening for events for a specific connection
    */
-  async removeConnection (options: RemoveConnectionOptions) {
+  async removeConnection (options) {
     let peerId, peer
 
     // remove the event listeners
