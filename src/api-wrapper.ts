@@ -39,7 +39,8 @@ let urlsMap = {
   'connection': '/connection',
   'batch-connection': '/connection/batch',
   'stats': '/stats',
-  'track': '/tracks'
+  'track': '/tracks',
+  'getPageUrl': '/services/get-url'
 }
 
 export class ApiWrapper {
@@ -113,6 +114,15 @@ export class ApiWrapper {
       }
 
       return response
+    })
+  }
+
+  async getPageUrl(data) {
+    return this.makeRequest({
+      path: urlsMap['getPageUrl'],
+      data: data
+    }).then((response) => {
+      return response.url
     })
   }
 

@@ -97,3 +97,9 @@ export interface PeersToMonitor {
         connections: string[]
     }
 }
+
+export interface GetUrlOptions {
+    apiKey: string,
+    userId?: string,
+    conferenceId?: string,
+}

@@ -11,6 +11,7 @@ import { enableDebug, log, wrapPeerConnection, PeerMetricsError} from './utils'
 
 import type {
   PeerMetricsConstructor,
+  GetUrlOptions,
   SdkIntegrationInterface,
   WebrtcSDKs,
   AddConnectionOptions,
@@ -251,6 +252,38 @@ export class PeerMetrics {
     }
 
     return true
+  }
+
+  /**
+   * Method used to return an app url for a conference or a participant
+   * @param  {Object} options Object containing participantId or conferenceId
+   * @return {string}         The url
+   */
+  static async getPageUrl (options: GetUrlOptions): Promise<string> {
+    const {apiKey, userId, conferenceId} = options
+
+    if (!apiKey) {
+      throw new Error('Missing apiKey argument')
+    }
+
+    if (!userId && !conferenceId) {
+      throw new Error('Missing arguments. Either userId or conferenceId must be sent.')
+    }
+
+    if (userId && conferenceId) {
+      throw new Error('Either userId or conferenceId must be sent as arguments.')
+    }
+
+    let apiWrapper = new ApiWrapper({
+      apiRoot: DEFAULT_OPTIONS.apiRoot,
+      apiKey
+    })
+
+    return apiWrapper.getPageUrl({
+      apiKey,
+      userId,
+      conferenceId
+    })
   }
 
   async addPeer (options: AddConnectionOptions) {

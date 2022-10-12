@@ -12,6 +12,7 @@ Peer metrics is a service that helps you collect events and metrics for your `We
 2. [Usage](#usage)
    1. [Options](#options)
    2. [API](#api)
+   3. [Static methods](#static-methods)
 3. [SDK integrations](#sdk-integrations)
    1. [LiveKit](#livekit)
    2. [Twilio Video](#twilio-video)
@@ -58,7 +59,8 @@ let peerMetrics = new PeerMetrics({
     userId: '1234',
     userName: 'My user',
     conferenceId: 'conference-1',
-    conferenceName: 'Conference from 4pm'
+    conferenceName: 'Conference from 4pm',
+    appVersion: '1.0.1'
 })
 // initialize the sdk
 await peerMetrics.initialize()
@@ -90,7 +92,7 @@ let peerMetrics = new PeerMetrics({
     // a readable name for this conference
     conferenceName: 'Conference from 4pm', // String, optional
 
-    // the version of your app. this helps you filter conferecens/stats for a specific version
+    // the version of your app. this helps you filter conferecens/stats/issues for a specific version
     appVersion: '0.0.1', // String, optional
 
     // if the sdk can't be run on the other side of the call (for example a SFU) you can still collect some stats for that using this flag
@@ -175,6 +177,24 @@ This helps you get a better context of the actions the user took that might have
 #### `.mute()`/`.unmute()`
 
 Save event that user muted/unmuted the microphone
+
+
+
+### Static methods
+
+#### `.getPageUrl()`
+
+Method used to get the peer metrics page url for a conference or a participants. Useful if you would like to link to one of these pages in your internal website/tool.
+
+```js
+await PeerMetrics.getPageUrl({
+    apiKey: 'you-api-key', // mandatory
+
+    userId: 'my-user-id', // the userId provided to peer metrics during a call
+    // or
+    conferenceId: 'confence-id' // an ID provided for a past conference
+})
+```
 
 
 
