@@ -130,8 +130,12 @@ Used to integrate with different SDKs. See [here](#sdk-integrations) list for op
 Adds a connection to the watch list.
 `options`
 
-  - `pc`: the `RTCPeerConnection` instance
-  - `peerId`: String a unique Id to identify this peer
+```js
+{
+	`pc`: pc, // RTCPeerConnection instance
+	`peerId`: 'peer-1' // String, a unique Id to identify this peer
+}
+```
 
 **Note:** Monitoring of a peer will automatically end when the connection is closed.
 
@@ -143,11 +147,19 @@ Stop listening for events on a specific connection.
 
 `options` can be one of two options:
 
-- `connectionId`: the one returned after calling `.addConnection()`
+```js
+{
+	'connectionId': '123' // the one returned after calling `.addConnection()`
+}
+```
 
 OR
 
-- `pc`: the `RTCPeerConnection` instance
+```js
+{
+	'pc': pc // the `RTCPeerConnection` instance
+}
+```
 
 
 

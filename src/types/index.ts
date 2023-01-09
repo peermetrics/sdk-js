@@ -11,8 +11,8 @@ export interface PageEvents {
 }
 
 export interface DefaultOptions {
-    apiRoot: string,
-    getStatsInterval: number,
+    apiRoot?: string,
+    getStatsInterval?: number,
     remote?: boolean,
     debug?: boolean,
     mockRequests?: boolean,
@@ -85,6 +85,11 @@ export interface AddConnectionOptions {
     remote?: boolean,
     peerName?: string,
     isSfu?: boolean
+}
+
+export interface RemoveConnectionOptions {
+    pc?: RTCPeerConnection
+    connectionId?: string
 }
 
 export interface AddEventOptions extends Object {

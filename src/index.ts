@@ -15,6 +15,7 @@ import type {
   SdkIntegrationInterface,
   WebrtcSDKs,
   AddConnectionOptions,
+  RemoveConnectionOptions,
   SessionData,
   PageEvents,
   AddEventOptions,
@@ -353,7 +354,7 @@ export class PeerMetrics {
   /**
    * Stop listening for events for a specific connection
    */
-  async removeConnection (options) {
+  async removeConnection (options: RemoveConnectionOptions) {
     let peerId, peer
 
     // remove the event listeners
