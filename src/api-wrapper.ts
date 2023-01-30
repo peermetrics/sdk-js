@@ -160,7 +160,7 @@ export class ApiWrapper {
     return this.makeRequest({
       path: urlsMap['events-browser'],
       data: {
-        eventName: data.eventName || 'custom',
+        eventName: 'custom',
         data: data
       }
     })
