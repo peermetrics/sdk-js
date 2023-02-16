@@ -306,6 +306,16 @@ export class ApiWrapper {
     }
   }
 
+  sendEndCall () {
+    return this.makeRequest({
+      path: urlsMap['events-browser'],
+      retry: true,
+      data: {
+        eventName: 'endCall'
+      }
+    })
+  }
+
   private async makeRequest (options: MakeRequest) {
     // we just need the path, the base url is set at initialization
     let {path, timestamp, data, retry = false} = options

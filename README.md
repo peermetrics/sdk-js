@@ -4,7 +4,9 @@
 
 This is the repo for the `PeerMetrics` JS SDK. 
 
-Peer metrics is a service that helps you collect events and metrics for your `WebRTC` connections. You can read more about the service on [peermetrics.io](https://peermetrics.io/).
+Peer metrics is a service that helps you collect events and metrics for your `WebRTC` connections. 
+
+You can read more about the service on [peermetrics.io](https://peermetrics.io/).
 
 ### Contents
 
@@ -23,7 +25,8 @@ Peer metrics is a service that helps you collect events and metrics for your `We
    7. [Pion](#pion)
    8. [SimplePeer](#simplepeer)
 4. [Browser support](#browser-support)
-5. [License](#license)
+5. [Use cases](#use-cases)
+6. [License](#license)
 
 
 
@@ -141,6 +144,14 @@ Adds a connection to the watch list.
 
 
 
+#### `.endCall()`
+
+The helper method stops listening to events on all connections and also ends the current session of this user.
+
+This is useful for the case when multiple conferences happen consecutively without the user refreshing the page.
+
+
+
 #### `.removeConnection(options)`
 
 Stop listening for events on a specific connection.
@@ -224,9 +235,11 @@ let peerMetrics = new PeerMetrics({
     conferenceId: 'room-1',
     conferenceName: 'Call from 4pm'
 })
+
 // initialize the SDK
 await peerMetrics.initialize()
-// call addSdkIntegration()
+
+// call addSdkIntegration() with the appropriate options for each SDK
 await peerMetrics.addSdkIntegration(options)
 
 // That's it
@@ -471,6 +484,59 @@ peerMetrics.addConnection({
 ## Browser support
 
 Right now, the SDK is compatible with the latest version of Chromium based browsers (Chrome, Edge, Brave, etc), Firefox and Safari.
+
+## Use cases
+
+#### Multiple calls on a page
+
+If you app permits the user to have multiple calls on page you'll need to initialize the `PeerMetrics` instance every time.
+
+For example:
+
+1. On page load initialize the SDK as mentioned in the [docs](#usage)
+
+   ```js
+   let peerMetrics = new PeerMetrics({
+       apiKey: '7090df95cd247f4aa735779636b202',
+       userId: '1234',
+       userName: 'My user',
+       conferenceId: 'conference-1',
+       conferenceName: 'Conference from 4pm',
+       appVersion: '1.0.1'
+   })
+   ```
+
+2. Call `initialize()`
+
+   ```js
+   await peerMetrics.initialize()
+   ```
+
+3. Call `addConnection()` or if you use one of our [SDK integration](#sdk-integrations), skip this step
+
+   ```js
+   await peerMetrics.addConnection({
+       pc: pc1,
+       peerId: '1' # any string that helps you identify this peer
+   })
+   ```
+
+4. At the end of the current call/conference, call `.endCall()`
+
+   ```js
+   await peerMetrics.endCall()
+   ```
+
+5. To start monitoring again, call `initialize()` again with details for the new conference:
+
+   ```
+   await peerMetrics.initialize({
+   	conferenceId: 'conference-2',
+       conferenceName: 'Second Conference',
+   })
+   ```
+
+6. Continue from step `3`
 
 
 

@@ -56,6 +56,11 @@ export interface SdkIntegrationInterface {
     pion?: boolean | PionIntegrationInterface
 }
 
+export interface InitializeObject {
+    conferenceId: string,
+    conferenceName?: string,
+}
+
 export interface PeerMetricsConstructor extends DefaultOptions {
     apiKey: string,
     userId: string,

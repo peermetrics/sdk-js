@@ -11,6 +11,7 @@ import { enableDebug, log, wrapPeerConnection, PeerMetricsError} from './utils'
 
 import type {
   PeerMetricsConstructor,
+  InitializeObject,
   GetUrlOptions,
   SdkIntegrationInterface,
   WebrtcSDKs,
@@ -159,11 +160,26 @@ export class PeerMetrics {
   }
 
   /**
-   * Used to initialize the sdk
+   * Used to initialize the sdk. Accepts an optional object with a conferenceId and conferenceName
    * @return {Promise}
    */
-  async initialize () {
+  async initialize (options?: InitializeObject) {
     let response
+    let conferenceId = this._options.conferenceId
+    let conferenceName = this._options.conferenceName
+
+    // if the user sent an object, extract the conferenceId and conferenceName
+    if (typeof options === 'object') {
+      if (!options.conferenceId) {
+        throw new Error('Missing conferenceId argument')
+      }
+
+      conferenceId = options.conferenceId
+
+      if (options.conferenceName) {
+        conferenceName = options.conferenceName
+      }
+    }
 
     // if we are already initialized
     if (this._initialized) return
@@ -191,8 +207,8 @@ export class PeerMetrics {
       // check quota, etc
       // create the conference
       response = await this.apiWrapper.initialize({
-        conferenceId: this._options.conferenceId,
-        conferenceName: this._options.conferenceName
+        conferenceId,
+        conferenceName
       })
     } catch (responseError) {
       const error = new PeerMetricsError(responseError.message)
@@ -486,14 +502,29 @@ export class PeerMetrics {
     return this.apiWrapper.sendCustomEvent({eventName: 'unmute'})
   }
 
-  private addPageEventListeners (options: PageEvents) {
-    window.addEventListener('beforeunload', () => {
-      this.apiWrapper.sendLeaveEvent('beforeunload')
-    })
+  /**
+   * Used to stop all event listeners and end current session
+   */
+  async endCall () {
+    this.webrtcStats.destroy()
+    this.webrtcStats = null
 
-    window.addEventListener('unload', () => {
-      this.apiWrapper.sendBeaconEvent('unload')
-    })
+    peersToMonitor = {}
+    monitoredConnections = {}
+
+    this._initialized = false
+
+    window.removeEventListener('beforeunload', this._eventListenersCallbacks.beforeunload)
+    window.removeEventListener('unload', this._eventListenersCallbacks.unload)
+    navigator.mediaDevices.removeEventListener('devicechange', this._eventListenersCallbacks.devicechange)
+
+    return this.apiWrapper.sendEndCall()
+  }
+
+  private addPageEventListeners (options: PageEvents) {
+    window.addEventListener('beforeunload', this._eventListenersCallbacks.beforeunload)
+
+    window.addEventListener('unload', this._eventListenersCallbacks.unload)
 
     // tab focus/unfocus
     if (options.pageVisibility && window.document) {
@@ -556,7 +587,19 @@ export class PeerMetrics {
   }
 
   private addMediaDeviceChangeListener () {
-    navigator.mediaDevices.addEventListener('devicechange', () => {
+    navigator.mediaDevices.addEventListener('devicechange', this._eventListenersCallbacks.devicechange)
+  }
+
+  private _eventListenersCallbacks = {
+    beforeunload: () => {
+      this.apiWrapper.sendLeaveEvent('beforeunload')
+    },
+
+    unload: () => {
+      this.apiWrapper.sendBeaconEvent('unload')
+    },
+
+    devicechange: () => {
       // first get the new devices
       return this.user.getDevices()
         .then((devices) => {
@@ -564,7 +607,7 @@ export class PeerMetrics {
           // and then send the event to the server
           this.apiWrapper.sendMediaDeviceChange(devices)
         })
-    })
+    }
   }
 
   private _initializeStatsModule (getStatsInterval = DEFAULT_OPTIONS.getStatsInterval) {

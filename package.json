@@ -26,8 +26,8 @@
     "analytics"
   ],
   "dependencies": {
-    "@peermetrics/webrtc-stats": "5.6.0",
-    "ua-parser-js": "1.0.2",
+    "@peermetrics/webrtc-stats": "5.7.0",
+    "ua-parser-js": "1.0.33",
     "wretch": "1.7.10"
   },
   "devDependencies": {
