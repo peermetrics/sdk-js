@@ -512,7 +512,7 @@ For example:
    await peerMetrics.initialize()
    ```
 
-3. Call `addConnection()` or if you use one of our [SDK integration](#sdk-integrations), skip this step
+3. Call `addConnection()` or if you use one of our [SDK integration](#sdk-integrations), follow the steps for that specific case
 
    ```js
    await peerMetrics.addConnection({
@@ -527,11 +527,11 @@ For example:
    await peerMetrics.endCall()
    ```
 
-5. To start monitoring again, call `initialize()` again with details for the new conference:
+5. To start monitoring again, call `initialize()` again with details for the new conference
 
-   ```
+   ```js
    await peerMetrics.initialize({
-   	conferenceId: 'conference-2',
+       conferenceId: 'conference-2',
        conferenceName: 'Second Conference',
    })
    ```
