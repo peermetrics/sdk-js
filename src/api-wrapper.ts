@@ -25,7 +25,8 @@ const UNRECOVERABLE_ERRORS = [
   'domain_not_allowed',
   'quota_exceeded',
   'invalid_api_key',
-  'app_not_recording'
+  'app_not_recording',
+  'connection_ended',
 ]
 
 /**
