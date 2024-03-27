@@ -1,6 +1,6 @@
 {
   "name": "@peermetrics/sdk",
-  "version": "2.7.1",
+  "version": "2.7.2",
   "description": "The peer metrics javascript SDK",
   "main": "dist/index.js",
   "repository": "https://github.com/peermetrics/sdk-js",
