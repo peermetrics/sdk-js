@@ -22,8 +22,7 @@ You can read more about the service on [peermetrics.io](https://peermetrics.io/)
    4. [Janus](#janus)
    5. [Vonage](#vonage)
    6. [Agora](#agora)
-   7. [Pion](#pion)
-   8. [SimplePeer](#simplepeer)
+   7. [Jitsi Meet](#jitsi-meet)
 4. [Browser support](#browser-support)
 5. [Use cases](#use-cases)
 6. [Documentation](#documentation)
@@ -429,58 +428,60 @@ peerMetrics.addSdkIntegration({
 })
 ```
 
-### Pion
+### Jitsi Meet
 
-Integrating with Pion is dead simple. If for example you are using [ion sdk js](https://github.com/pion/ion-sdk-js), just initialize peer metrics first and you are good to go:
+To integrate with [Jitsi Meet](https://jitsi.org/jitsi-meet/), you can use the built-in Jitsi integration. The SDK will automatically detect and monitor WebRTC connections created by Jitsi:
 
-```js
-import { Client, LocalStream, RemoteStream } from 'ion-sdk-js';
-import { IonSFUJSONRPCSignal } from 'ion-sdk-js/lib/signal/json-rpc-impl';
-import { PeerMetrics } from '@peermetrics/sdk'
+```html
+<!-- Load PeerMetrics SDK -->
+<script src="//cdn.peermetrics.io/js/sdk/peermetrics.min.js"></script>
 
-let peerMetrics = new PeerMetrics({...})
-await peerMetrics.initialize()
+<!-- Load Jitsi Meet External API -->
+<script src="https://meet.jit.si/external_api.js"></script>
 
-peerMetrics.addSdkIntegration({
-    pion: true
-})
+<script>
+(async () => {
+    // Initialize PeerMetrics
+    const peerMetrics = new PeerMetrics({
+        apiKey: 'your-api-key',
+        userId: 'user-123',
+        userName: 'John Doe',
+        conferenceId: 'room-123',
+        conferenceName: 'My Conference',
+        debug: true
+    })
 
-// then continue with the usual things
-const signal = new IonSFUJSONRPCSignal("wss://ion-sfu:7000/ws");
-const client = new Client(signal);
-signal.onopen = () => client.join("test session", "test uid")
-```
+    await peerMetrics.initialize()
 
-You can pass additional details to `addSdkIntegration()` to better identify the SFU server the user is connecting to:
+    // Add Jitsi integration - SDK will automatically wrap RTCPeerConnection
+    await peerMetrics.addSdkIntegration({
+        jitsi: {
+            serverId: 'jitsi-sfu-server',
+            serverName: 'Jitsi SFU Server'
+        }
+    })
 
-```js
-peerMetrics.addSdkIntegration({
-    pion: {
-        serverId: 'pion-sfu-na',
-        serverName: 'Pion SFU North America'
+    // Initialize Jitsi Meet
+    const domain = 'meet.jit.si'
+    const options = {
+        roomName: 'MyRoom',
+        width: '100%',
+        height: 500,
+        parentNode: document.querySelector('#jitsi-container')
     }
-})
+    
+    const api = new JitsiMeetExternalAPI(domain, options)
+    
+    // WebRTC connections will be automatically captured by PeerMetrics!
+})()
+</script>
 ```
 
-### SimplePeer
-
-To integrate with `SimplePeer` you would just need to pass the `RTCPeerConnection` to `PeerMetrics`. For example:
-
-```js
-var peer = new SimplePeer({
-    initiator: true,
-    config: iceServers,
-    stream: stream,
-    trickle: true
-})
-
-peerMetrics.addConnection({
-    pc: peer._pc,
-    peerId: peerId
-})
-```
-
-
+**Features:**
+- ✅ **Automatic WebRTC detection**: No manual connection wrapping needed
+- ✅ **Event monitoring**: Captures mute/unmute, join/leave events
+- ✅ **Stats collection**: Monitors all WebRTC statistics from Jitsi connections
+- ✅ **Custom events**: Send custom events for Jitsi-specific actions
 
 ## Browser support
 

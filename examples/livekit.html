@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>PeerMetrics SDK - LiveKit Integration</title>
+    <script src="../dist/browser.js"></script>
+    <script src="https://unpkg.com/livekit-client@latest/dist/livekit-client.umd.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        button { padding: 10px 20px; margin: 5px; font-size: 16px; }
+        video { width: 300px; height: 200px; margin: 10px; border: 1px solid #ccc; }
+        .status { padding: 10px; margin: 10px 0; background: #f0f0f0; border-radius: 5px; }
+        .log { background: #000; color: #0f0; padding: 10px; margin: 10px 0; height: 200px; overflow-y: auto; font-family: monospace; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>PeerMetrics SDK - LiveKit Integration</h1>
+        
+        <div class="status" id="status">
+            Status: Not connected
+        </div>
+        
+        <div class="config">
+            <div style="margin: 10px 0;">
+                <label for="livekitUrl">LiveKit URL:</label><br>
+                <input type="text" id="livekitUrl" placeholder="wss://your-livekit-server.com" 
+                       value="wss://your-livekit-server.com" style="width: 300px; padding: 5px; margin: 5px 0;">
+            </div>
+            <div style="margin: 10px 0;">
+                <label for="livekitToken">LiveKit Token:</label><br>
+                <input type="text" id="livekitToken" placeholder="your-livekit-token" 
+                       value="your-livekit-token" style="width: 300px; padding: 5px; margin: 5px 0;">
+            </div>
+        </div>
+        
+        <div>
+            <button id="connectBtn">Connect to Room</button>
+            <button id="disconnectBtn" disabled>Disconnect</button>
+            <button id="toggleVideoBtn" disabled>Toggle Video</button>
+            <button id="toggleAudioBtn" disabled>Toggle Audio</button>
+        </div>
+        
+        <div>
+            <video id="localVideo" autoplay muted></video>
+            <video id="remoteVideo" autoplay></video>
+        </div>
+        
+        <div class="log" id="log"></div>
+    </div>
+
+    <script>
+        let peerMetrics = null
+        let room = null
+        let localVideo = null
+        let remoteVideo = null
+        
+        // DOM elements
+        const statusEl = document.getElementById('status')
+        const logEl = document.getElementById('log')
+        const connectBtn = document.getElementById('connectBtn')
+        const disconnectBtn = document.getElementById('disconnectBtn')
+        const toggleVideoBtn = document.getElementById('toggleVideoBtn')
+        const toggleAudioBtn = document.getElementById('toggleAudioBtn')
+        const livekitUrlEl = document.getElementById('livekitUrl')
+        const livekitTokenEl = document.getElementById('livekitToken')
+        
+        // Logging function
+        function log(message) {
+            const timestamp = new Date().toLocaleTimeString()
+            logEl.innerHTML += `[${timestamp}] ${message}<br>`
+            logEl.scrollTop = logEl.scrollHeight
+            console.log(message)
+        }
+        
+        // Initialize PeerMetrics
+        async function initPeerMetrics() {
+            try {
+                peerMetrics = new PeerMetrics({
+                    apiKey: 'test-api-key-12345',
+                    userId: 'livekit-user-' + Math.random().toString(36).substr(2, 9),
+                    userName: 'LiveKit User',
+                    conferenceId: 'livekit-room-' + Math.random().toString(36).substr(2, 9),
+                    conferenceName: 'LiveKit Demo Room',
+                    appVersion: '1.0.0',
+                    debug: true,
+                    mockRequests: true
+                })
+                
+                await peerMetrics.initialize()
+                log('✅ PeerMetrics initialized successfully')
+                
+                // Add LiveKit integration
+                await peerMetrics.addSdkIntegration({
+                    livekit: {
+                        room: room,
+                        serverId: 'livekit-demo-server',
+                        serverName: 'LiveKit Demo Server'
+                    }
+                })
+                
+                log('✅ LiveKit integration added')
+                
+            } catch (error) {
+                log('❌ PeerMetrics initialization failed: ' + error.message)
+            }
+        }
+        
+        // Connect to LiveKit room
+        async function connectToRoom() {
+            try {
+                log('🔄 Connecting to LiveKit room...')
+                statusEl.textContent = 'Status: Connecting...'
+                connectBtn.disabled = true
+                
+                // Create LiveKit room
+                room = new LiveKit.Room({
+                    adaptiveStream: true,
+                    dynacast: true,
+                    publishDefaults: {
+                        videoSimulcastLayers: [
+                            { resolution: LiveKit.VideoPresets.h90, encoding: { maxBitrate: 200_000 } },
+                            { resolution: LiveKit.VideoPresets.h180, encoding: { maxBitrate: 400_000 } },
+                            { resolution: LiveKit.VideoPresets.h360, encoding: { maxBitrate: 800_000 } }
+                        ]
+                    }
+                })
+                
+                // Set up event listeners
+                room.on(LiveKit.RoomEvent.Connected, () => {
+                    log('✅ Connected to LiveKit room')
+                    statusEl.textContent = 'Status: Connected'
+                    disconnectBtn.disabled = false
+                    toggleVideoBtn.disabled = false
+                    toggleAudioBtn.disabled = false
+                })
+                
+                room.on(LiveKit.RoomEvent.Disconnected, () => {
+                    log('❌ Disconnected from LiveKit room')
+                    statusEl.textContent = 'Status: Disconnected'
+                    connectBtn.disabled = false
+                    disconnectBtn.disabled = true
+                    toggleVideoBtn.disabled = true
+                    toggleAudioBtn.disabled = true
+                })
+                
+                room.on(LiveKit.RoomEvent.TrackSubscribed, (track, publication, participant) => {
+                    log(`📺 Track subscribed: ${track.kind} from ${participant.identity}`)
+                    if (track.kind === LiveKit.Track.Kind.Video) {
+                        const videoElement = remoteVideo
+                        videoElement.srcObject = new MediaStream([track.mediaStreamTrack])
+                    }
+                })
+                
+                room.on(LiveKit.RoomEvent.TrackUnsubscribed, (track, publication, participant) => {
+                    log(`📺 Track unsubscribed: ${track.kind} from ${participant.identity}`)
+                })
+                
+                room.on(LiveKit.RoomEvent.ParticipantConnected, (participant) => {
+                    log(`👤 Participant connected: ${participant.identity}`)
+                })
+                
+                room.on(LiveKit.RoomEvent.ParticipantDisconnected, (participant) => {
+                    log(`👤 Participant disconnected: ${participant.identity}`)
+                })
+                
+                // Get URL and token from input fields
+                const livekitUrl = livekitUrlEl.value.trim()
+                const livekitToken = livekitTokenEl.value.trim()
+                
+                if (!livekitUrl || livekitUrl === 'wss://your-livekit-server.com') {
+                    throw new Error('Please enter a valid LiveKit URL')
+                }
+                
+                if (!livekitToken || livekitToken === 'your-livekit-token') {
+                    throw new Error('Please enter a valid LiveKit token')
+                }
+                
+                // Connect to room
+                await room.connect(livekitUrl, livekitToken)
+                
+                // Enable camera and microphone
+                await room.localParticipant.enableCameraAndMicrophone()
+                
+                // Get local video stream
+                const localTracks = room.localParticipant.videoTracks
+                if (localTracks.size > 0) {
+                    const localTrack = Array.from(localTracks.values())[0]
+                    localVideo.srcObject = new MediaStream([localTrack.mediaStreamTrack])
+                    log('📹 Local video enabled')
+                }
+                
+                // Initialize PeerMetrics after room is connected
+                await initPeerMetrics()
+                
+            } catch (error) {
+                log('❌ Failed to connect to LiveKit: ' + error.message)
+                statusEl.textContent = 'Status: Connection failed'
+                connectBtn.disabled = false
+            }
+        }
+        
+        // Disconnect from room
+        async function disconnectFromRoom() {
+            try {
+                log('🔄 Disconnecting from LiveKit room...')
+                await room.disconnect()
+                log('✅ Disconnected from LiveKit room')
+            } catch (error) {
+                log('❌ Error disconnecting: ' + error.message)
+            }
+        }
+        
+        // Toggle video
+        async function toggleVideo() {
+            try {
+                const videoEnabled = room.localParticipant.isCameraEnabled
+                if (videoEnabled) {
+                    await room.localParticipant.setCameraEnabled(false)
+                    log('📹 Video disabled')
+                } else {
+                    await room.localParticipant.setCameraEnabled(true)
+                    log('📹 Video enabled')
+                }
+            } catch (error) {
+                log('❌ Error toggling video: ' + error.message)
+            }
+        }
+        
+        // Toggle audio
+        async function toggleAudio() {
+            try {
+                const audioEnabled = room.localParticipant.isMicrophoneEnabled
+                if (audioEnabled) {
+                    await room.localParticipant.setMicrophoneEnabled(false)
+                    log('🎤 Audio disabled')
+                } else {
+                    await room.localParticipant.setMicrophoneEnabled(true)
+                    log('🎤 Audio enabled')
+                }
+            } catch (error) {
+                log('❌ Error toggling audio: ' + error.message)
+            }
+        }
+        
+        // Event listeners
+        connectBtn.addEventListener('click', connectToRoom)
+        disconnectBtn.addEventListener('click', disconnectFromRoom)
+        toggleVideoBtn.addEventListener('click', toggleVideo)
+        toggleAudioBtn.addEventListener('click', toggleAudio)
+        
+        // Initialize
+        log('🚀 LiveKit integration example loaded')
+        log('📝 Note: Enter your LiveKit URL and token in the form above to test with real LiveKit server')
+        log('🔧 This example uses mockRequests: true for testing')
+    </script>
+</body>
+</html>

@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>PeerMetrics SDK - Jitsi Meet Integration</title>
+    <script src="../dist/browser.js"></script>
+    <script src="https://meet.jit.si/external_api.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .container { max-width: 1000px; margin: 0 auto; }
+        button { padding: 10px 20px; margin: 5px; font-size: 16px; }
+        .status { padding: 10px; margin: 10px 0; background: #f0f0f0; border-radius: 5px; }
+        .log { background: #000; color: #0f0; padding: 10px; margin: 10px 0; height: 200px; overflow-y: auto; font-family: monospace; }
+        .jitsi-container { width: 100%; height: 500px; margin: 20px 0; border: 1px solid #ccc; }
+        .controls { margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>PeerMetrics SDK - Jitsi Meet Integration</h1>
+        
+        <div class="status" id="status">
+            Status: Not connected
+        </div>
+        
+        <div class="controls">
+            <input type="text" id="roomName" placeholder="Enter room name" value="PeerMetricsDemo" style="padding: 8px; margin: 5px;">
+            <button id="joinBtn">Join Room</button>
+            <button id="leaveBtn" disabled>Leave Room</button>
+            <button id="toggleVideoBtn" disabled>Toggle Video</button>
+            <button id="toggleAudioBtn" disabled>Toggle Audio</button>
+            <button id="toggleChatBtn" disabled>Toggle Chat</button>
+        </div>
+        
+        <div class="jitsi-container" id="jitsiContainer"></div>
+        
+        <div class="log" id="log"></div>
+    </div>
+
+    <script>
+        let peerMetrics = null
+        let api = null
+        let isVideoEnabled = true
+        let isAudioEnabled = true
+        let isChatOpen = false
+        
+        // DOM elements
+        const statusEl = document.getElementById('status')
+        const logEl = document.getElementById('log')
+        const roomNameEl = document.getElementById('roomName')
+        const joinBtn = document.getElementById('joinBtn')
+        const leaveBtn = document.getElementById('leaveBtn')
+        const toggleVideoBtn = document.getElementById('toggleVideoBtn')
+        const toggleAudioBtn = document.getElementById('toggleAudioBtn')
+        const toggleChatBtn = document.getElementById('toggleChatBtn')
+        const jitsiContainer = document.getElementById('jitsiContainer')
+        
+        // Logging function
+        function log(message) {
+            const timestamp = new Date().toLocaleTimeString()
+            logEl.innerHTML += `[${timestamp}] ${message}<br>`
+            logEl.scrollTop = logEl.scrollHeight
+            console.log(message)
+        }
+        
+        // Initialize PeerMetrics
+        async function initPeerMetrics() {
+            try {
+                peerMetrics = new PeerMetrics({
+                    apiKey: 'test-api-key-12345',
+                    userId: 'jitsi-user-' + Math.random().toString(36).substr(2, 9),
+                    userName: 'Jitsi User',
+                    conferenceId: roomNameEl.value,
+                    conferenceName: 'Jitsi Demo Room',
+                    appVersion: '1.0.0',
+                    debug: true,
+                    mockRequests: true,
+                    wrapPeerConnection: true  // Enable automatic WebRTC connection wrapping
+                })
+
+                await peerMetrics.initialize()
+                log('✅ PeerMetrics initialized successfully')
+
+                // Add Jitsi integration using the SDK's built-in method
+                // The SDK will automatically wrap RTCPeerConnection for Jitsi
+                await peerMetrics.addSdkIntegration({
+                    jitsi: {
+                        serverId: 'jitsi-sfu-server',
+                        serverName: 'Jitsi SFU Server'
+                    }
+                })
+                log('✅ Jitsi integration added to PeerMetrics')
+
+            } catch (error) {
+                log('❌ PeerMetrics initialization failed: ' + error.message)
+            }
+        }
+
+        
+        // Join Jitsi room
+        async function joinRoom() {
+            try {
+                const roomName = roomNameEl.value || 'PeerMetricsDemo'
+                log(`🔄 Joining Jitsi room: ${roomName}`)
+                statusEl.textContent = 'Status: Connecting...'
+                joinBtn.disabled = true
+                
+                // PeerMetrics should already be initialized with Jitsi integration
+                if (!peerMetrics) {
+                    log('❌ PeerMetrics not initialized. Please refresh the page.')
+                    return
+                }
+                
+                // Create Jitsi Meet API
+                const domain = 'meet.jit.si'
+                const options = {
+                    roomName: roomName,
+                    width: '100%',
+                    height: 500,
+                    parentNode: jitsiContainer,
+                    userInfo: {
+                        displayName: 'PeerMetrics User',
+                        email: 'user@example.com'
+                    },
+                    configOverwrite: {
+                        startWithAudioMuted: false,
+                        startWithVideoMuted: false,
+                        enableWelcomePage: false,
+                        prejoinPageEnabled: false
+                    },
+                    interfaceConfigOverwrite: {
+                        TOOLBAR_BUTTONS: [
+                            'microphone', 'camera', 'closedcaptions', 'desktop', 'fullscreen',
+                            'fodeviceselection', 'hangup', 'profile', 'chat', 'recording',
+                            'livestreaming', 'etherpad', 'sharedvideo', 'settings', 'raisehand',
+                            'videoquality', 'filmstrip', 'invite', 'feedback', 'stats', 'shortcuts',
+                            'tileview', 'videobackgroundblur', 'download', 'help', 'mute-everyone', 'security'
+                        ],
+                        SHOW_JITSI_WATERMARK: false,
+                        SHOW_WATERMARK_FOR_GUESTS: false,
+                        SHOW_POWERED_BY: false
+                    }
+                }
+                
+                api = new JitsiMeetExternalAPI(domain, options)
+                
+                // Set up event listeners
+                api.addListener('videoConferenceJoined', () => {
+                    log('✅ Joined Jitsi room successfully')
+                    statusEl.textContent = 'Status: Connected'
+                    leaveBtn.disabled = false
+                    toggleVideoBtn.disabled = false
+                    toggleAudioBtn.disabled = false
+                    toggleChatBtn.disabled = false
+                    
+                    // Send custom event to PeerMetrics
+                    if (peerMetrics) {
+                        peerMetrics.addEvent({
+                            eventName: 'jitsi_room_joined',
+                            description: 'Successfully joined Jitsi room',
+                            metadata: { roomName: roomName }
+                        })
+                    }
+                })
+                
+                api.addListener('videoConferenceLeft', () => {
+                    log('❌ Left Jitsi room')
+                    statusEl.textContent = 'Status: Disconnected'
+                    joinBtn.disabled = false
+                    leaveBtn.disabled = true
+                    toggleVideoBtn.disabled = true
+                    toggleAudioBtn.disabled = true
+                    toggleChatBtn.disabled = true
+                    
+                    // Send custom event to PeerMetrics
+                    if (peerMetrics) {
+                        peerMetrics.addEvent({
+                            eventName: 'jitsi_room_left',
+                            description: 'Left Jitsi room',
+                            metadata: { roomName: roomName }
+                        })
+                    }
+                })
+                
+                api.addListener('participantJoined', (participant) => {
+                    log(`👤 Participant joined: ${participant.displayName}`)
+                })
+                
+                api.addListener('participantLeft', (participant) => {
+                    log(`👤 Participant left: ${participant.displayName}`)
+                })
+                
+                api.addListener('videoMuteStatusChanged', (participant) => {
+                    log(`📹 Video mute status changed: ${participant.displayName} - ${participant.videoMuted ? 'muted' : 'unmuted'}`)
+                    
+                    // Send custom event to PeerMetrics
+                    if (peerMetrics) {
+                        peerMetrics.addEvent({
+                            eventName: participant.videoMuted ? 'video_muted' : 'video_unmuted',
+                            description: `Video ${participant.videoMuted ? 'muted' : 'unmuted'} by ${participant.displayName}`,
+                            metadata: { 
+                                participant: participant.displayName,
+                                isLocalParticipant: participant.local
+                            }
+                        })
+                    }
+                })
+                
+                api.addListener('audioMuteStatusChanged', (participant) => {
+                    log(`🎤 Audio mute status changed: ${participant.displayName} - ${participant.audioMuted ? 'muted' : 'unmuted'}`)
+                    
+                    // Send custom event to PeerMetrics
+                    if (peerMetrics) {
+                        peerMetrics.addEvent({
+                            eventName: participant.audioMuted ? 'audio_muted' : 'audio_unmuted',
+                            description: `Audio ${participant.audioMuted ? 'muted' : 'unmuted'} by ${participant.displayName}`,
+                            metadata: { 
+                                participant: participant.displayName,
+                                isLocalParticipant: participant.local
+                            }
+                        })
+                    }
+                })
+                
+                api.addListener('chatToggled', (chat) => {
+                    log(`💬 Chat toggled: ${chat.isOpen ? 'opened' : 'closed'}`)
+                })
+                
+                log('✅ Jitsi Meet API initialized')
+                
+                // Jitsi WebRTC connections will be automatically captured by the SDK
+                log('🎯 Jitsi WebRTC connections will be automatically captured by PeerMetrics SDK!')
+                
+            } catch (error) {
+                log('❌ Failed to join Jitsi room: ' + error.message)
+                statusEl.textContent = 'Status: Connection failed'
+                joinBtn.disabled = false
+            }
+        }
+        
+        
+        // Leave room
+        function leaveRoom() {
+            try {
+                log('🔄 Leaving Jitsi room...')
+                api.dispose()
+                log('✅ Left Jitsi room')
+            } catch (error) {
+                log('❌ Error leaving room: ' + error.message)
+            }
+        }
+        
+        // Toggle video
+        function toggleVideo() {
+            try {
+                api.executeCommand('toggleVideo')
+                isVideoEnabled = !isVideoEnabled
+                log(`📹 Video ${isVideoEnabled ? 'enabled' : 'disabled'}`)
+            } catch (error) {
+                log('❌ Error toggling video: ' + error.message)
+            }
+        }
+        
+        // Toggle audio
+        function toggleAudio() {
+            try {
+                api.executeCommand('toggleAudio')
+                isAudioEnabled = !isAudioEnabled
+                log(`🎤 Audio ${isAudioEnabled ? 'enabled' : 'disabled'}`)
+            } catch (error) {
+                log('❌ Error toggling audio: ' + error.message)
+            }
+        }
+        
+        // Toggle chat
+        function toggleChat() {
+            try {
+                api.executeCommand('toggleChat')
+                isChatOpen = !isChatOpen
+                log(`💬 Chat ${isChatOpen ? 'opened' : 'closed'}`)
+            } catch (error) {
+                log('❌ Error toggling chat: ' + error.message)
+            }
+        }
+        
+        // Event listeners
+        joinBtn.addEventListener('click', joinRoom)
+        leaveBtn.addEventListener('click', leaveRoom)
+        toggleVideoBtn.addEventListener('click', toggleVideo)
+        toggleAudioBtn.addEventListener('click', toggleAudio)
+        toggleChatBtn.addEventListener('click', toggleChat)
+        
+        // Initialize
+        log('🚀 Jitsi Meet integration example loaded')
+        log('🔧 This example uses mockRequests: true for testing')
+        log('📝 Note: This example uses meet.jit.si (public Jitsi server)')
+        log('🎯 Using PeerMetrics SDK built-in Jitsi integration!')
+        
+        // Initialize PeerMetrics with Jitsi integration
+        initPeerMetrics()
+    </script>
+</body>
+</html>

@@ -2,7 +2,19 @@
 export * from './api'
 
 declare global {
-    interface Window { PeerMetricsOptions: any; }
+    interface Window { 
+        PeerMetricsOptions: any;
+        JitsiMeetJS?: {
+            app?: {
+                _room?: {
+                    rtc?: any;
+                };
+            };
+        };
+        LiveKit?: any;
+        Twilio?: any;
+        AgoraRTC?: any;
+    }
 }
 
 export interface PageEvents {
@@ -46,6 +58,11 @@ export interface PionIntegrationInterface {
     serverName?: string
 }
 
+export interface JitsiIntegrationInterface {
+    serverId?: string
+    serverName?: string
+}
+
 export interface SdkIntegrationInterface {
     mediasoup?: MediaSoupIntegration,
     janus?: JanusIntegrationInterface,
@@ -54,6 +71,7 @@ export interface SdkIntegrationInterface {
     vonage?: boolean
     agora?: boolean
     pion?: boolean | PionIntegrationInterface
+    jitsi?: boolean | JitsiIntegrationInterface
 }
 
 export interface InitializeObject {

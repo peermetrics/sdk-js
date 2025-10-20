@@ -1,6 +1,6 @@
 {
   "name": "@peermetrics/sdk",
-  "version": "2.7.2",
+  "version": "2.8.0",
   "description": "The peer metrics javascript SDK",
   "main": "dist/index.js",
   "repository": "https://github.com/peermetrics/sdk-js",
@@ -8,7 +8,7 @@
   "license": "MIT",
   "scripts": {
     "build": "rollup -c",
-    "serve": "http-server ./example",
+    "serve": "http-server . -p 8081 -o /examples",
     "watch": "rollup -c -w",
     "prepublishOnly": "npm run build",
     "pretest": "npm run build",

@@ -10,8 +10,6 @@ The PeerMetrics SDK supports integration with major WebRTC frameworks and SDKs:
 - **Janus** - WebRTC gateway
 - **Vonage** (OpenTok) - Vonage video platform
 - **Agora** - Agora video platform
-- **Pion** - Go-based WebRTC SFU
-- **SimplePeer** - Simple WebRTC wrapper
 
 ## 🚀 Integration Patterns
 

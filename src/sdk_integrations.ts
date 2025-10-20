@@ -20,6 +20,7 @@ export default class SdkIntegration extends EventEmitter {
         this.addVonageIntegration(options.vonage, peerConnectionEventEmitter)
         this.addAgoraIntegration(options.agora, peerConnectionEventEmitter)
         this.addPionIntegration(options.pion, peerConnectionEventEmitter)
+        this.addJitsiIntegration(options.jitsi, peerConnectionEventEmitter)
 
         return this.foundIntegration
     }
@@ -227,6 +228,112 @@ export default class SdkIntegration extends EventEmitter {
 
         this.webrtcSDK = 'pion';
         this.foundIntegration = true;
+    }
+
+    addJitsiIntegration(options: SdkIntegrationInterface['jitsi'], peerConnectionEventEmitter: EventEmitter) {
+        if (!options) return
+
+        // if the user sent just a boolean, use the default values for server id/name
+        if (typeof options === 'boolean') {
+            options = {}
+        }
+
+        let { serverId = 'jitsi-sfu-server', serverName = 'Jitsi SFU Server' } = options;
+
+        serverId = this.checkServerId(serverId);
+        serverName = this.checkServerName(serverName);
+
+        if (!peerConnectionEventEmitter) {
+            throw new Error("Could not integrate with Jitsi. Please make sure you set PeerMetricsOptions.wrapPeerConnection before loading the PeerMetrics script.");            
+        }
+
+        // Listen for new RTCPeerConnection instances created by Jitsi
+        peerConnectionEventEmitter.on('newRTCPeerconnection', (pc) => {
+            this.emit('newConnection', {
+                pc: pc,
+                peerId: serverId,
+                peerName: serverName,
+                isSfu: true,
+                remote: true
+            })
+        })
+
+        // Also try to find existing Jitsi connections
+        if (window.JitsiMeetJS && window.JitsiMeetJS.app) {
+            try {
+                const app = window.JitsiMeetJS.app
+                if (app._room && app._room.rtc) {
+                    this._searchExistingJitsiConnections(app._room.rtc, serverId, serverName)
+                }
+            } catch (error) {
+                // Jitsi not ready yet, connections will be captured via event emitter
+            }
+        }
+
+        this.webrtcSDK = 'jitsi';
+        this.foundIntegration = true;
+    }
+
+    /**
+     * Search for existing Jitsi WebRTC connections
+     * @private
+     */
+    private _searchExistingJitsiConnections(rtc, serverId: string, serverName: string) {
+        const possiblePaths = [
+            ['peerConnections'],
+            ['pc'],
+            ['peerConnection'],
+            ['rtc', 'peerConnections'],
+            ['rtc', 'pc']
+        ]
+
+        for (const path of possiblePaths) {
+            let current = rtc
+            for (const key of path) {
+                if (current && current[key]) {
+                    current = current[key]
+                } else {
+                    current = null
+                    break
+                }
+            }
+
+            if (current && typeof current === 'object') {
+                if (current instanceof Map) {
+                    for (const [peerId, pc] of current) {
+                        if (pc instanceof RTCPeerConnection) {
+                            this.emit('newConnection', {
+                                pc: pc,
+                                peerId: `${serverId}-${peerId}`,
+                                peerName: serverName,
+                                isSfu: true,
+                                remote: true
+                            })
+                        }
+                    }
+                } else if (Array.isArray(current)) {
+                    current.forEach((pc, index) => {
+                        if (pc instanceof RTCPeerConnection) {
+                            this.emit('newConnection', {
+                                pc: pc,
+                                peerId: `${serverId}-${index}`,
+                                peerName: serverName,
+                                isSfu: true,
+                                remote: true
+                            })
+                        }
+                    })
+                } else if (current instanceof RTCPeerConnection) {
+                    this.emit('newConnection', {
+                        pc: current,
+                        peerId: serverId,
+                        peerName: serverName,
+                        isSfu: true,
+                        remote: true
+                    })
+                }
+            }
+        }
     }
 
     /**
