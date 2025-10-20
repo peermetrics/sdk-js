@@ -115,27 +115,75 @@ export default class SdkIntegration extends EventEmitter {
 
         serverName = this.checkServerName(serverName)
 
-        // listen for the transportCreated event
-        room.engine.on('transportsCreated', (publiser, subscriber) => {
-            this.emit('newConnection', {
-                pc: publiser.pc,
-                peerId: serverId,
-                peerName: serverName,
-                isSfu: true,
-                remote: true
-            })
-
-            this.emit('newConnection', {
-                pc: subscriber.pc,
-                peerId: serverId,
-                peerName: serverName,
-                isSfu: true,
-                remote: true
-            })
+        // Listen for LiveKit transport creation events
+        room.engine.on('transportsCreated', (publisher, subscriber) => {
+            this._addLiveKitConnection(publisher.pc, serverId, serverName, 'outbound')
+            this._addLiveKitConnection(subscriber.pc, serverId, serverName, 'inbound')
         })
+        
+        // Search for existing connections as fallback
+        setTimeout(() => this._searchExistingLiveKitConnections(room, serverId, serverName), 1000)
 
         this.webrtcSDK = 'livekit'
         this.foundIntegration = true
+    }
+
+    _addLiveKitConnection(pc, serverId, serverName, direction) {
+        this.emit('newConnection', {
+            pc: pc,
+            peerId: `${serverId}-${direction}`,
+            peerName: `${serverName} ${direction}`,
+            isSfu: true,
+            remote: true
+        })
+    }
+
+    _searchExistingLiveKitConnections(room, serverId, serverName) {
+        try {
+            const connections = []
+            
+            // Check common connection locations
+            const locations = [
+                room.engine?.pcManager?.pc,
+                room.engine?.publisher?.pc,
+                room.engine?.subscriber?.pc,
+                room.engine?.transport?.pc
+            ]
+            
+            locations.forEach(pc => pc && connections.push(pc))
+            
+            // Deep search if no connections found
+            if (connections.length === 0 && room.engine) {
+                this._deepSearchForConnections(room.engine, connections)
+            }
+            
+            // Add found connections with descriptive direction names
+            connections.forEach((pc, index) => {
+                const direction = index === 0 ? 'outbound' : 'inbound'
+                this._addLiveKitConnection(pc, serverId, serverName, direction)
+            })
+            
+        } catch (error) {
+            // Silently handle errors - connections will be caught by event listeners
+        }
+    }
+
+    _deepSearchForConnections(obj, connections, visited = new Set()) {
+        if (!obj || typeof obj !== 'object' || visited.has(obj)) return
+        
+        visited.add(obj)
+        
+        if (obj.constructor?.name === 'RTCPeerConnection') {
+            connections.push(obj)
+            return
+        }
+        
+        // Recursively search object properties
+        Object.values(obj).forEach(value => {
+            if (value && typeof value === 'object') {
+                this._deepSearchForConnections(value, connections, visited)
+            }
+        })
     }
 
     addTwilioVideoIntegration (options) {
@@ -249,36 +297,41 @@ export default class SdkIntegration extends EventEmitter {
 
         // Listen for new RTCPeerConnection instances created by Jitsi
         peerConnectionEventEmitter.on('newRTCPeerconnection', (pc) => {
-            this.emit('newConnection', {
-                pc: pc,
-                peerId: serverId,
-                peerName: serverName,
-                isSfu: true,
-                remote: true
-            })
+            this._addJitsiConnection(pc, serverId, serverName)
         })
 
-        // Also try to find existing Jitsi connections
-        if (window.JitsiMeetJS && window.JitsiMeetJS.app) {
-            try {
-                const app = window.JitsiMeetJS.app
-                if (app._room && app._room.rtc) {
-                    this._searchExistingJitsiConnections(app._room.rtc, serverId, serverName)
-                }
-            } catch (error) {
-                // Jitsi not ready yet, connections will be captured via event emitter
-            }
-        }
+        // Search for existing Jitsi connections
+        this._searchExistingJitsiConnections(serverId, serverName)
 
         this.webrtcSDK = 'jitsi';
         this.foundIntegration = true;
+    }
+
+    _addJitsiConnection(pc, serverId, serverName) {
+        this.emit('newConnection', {
+            pc: pc,
+            peerId: serverId,
+            peerName: serverName,
+            isSfu: true,
+            remote: true
+        })
+    }
+
+    _searchExistingJitsiConnections(serverId, serverName) {
+        try {
+            if (window.JitsiMeetJS?.app?._room?.rtc) {
+                this._searchExistingJitsiConnectionsInternal(window.JitsiMeetJS.app._room.rtc, serverId, serverName)
+            }
+        } catch (error) {
+            // Jitsi not ready yet, connections will be captured via event emitter
+        }
     }
 
     /**
      * Search for existing Jitsi WebRTC connections
      * @private
      */
-    private _searchExistingJitsiConnections(rtc, serverId: string, serverName: string) {
+    private _searchExistingJitsiConnectionsInternal(rtc, serverId: string, serverName: string) {
         const possiblePaths = [
             ['peerConnections'],
             ['pc'],
