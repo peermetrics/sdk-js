@@ -477,12 +477,6 @@ To integrate with [Jitsi Meet](https://jitsi.org/jitsi-meet/), you can use the b
 </script>
 ```
 
-**Features:**
-- ✅ **Automatic WebRTC detection**: No manual connection wrapping needed
-- ✅ **Event monitoring**: Captures mute/unmute, join/leave events
-- ✅ **Stats collection**: Monitors all WebRTC statistics from Jitsi connections
-- ✅ **Custom events**: Send custom events for Jitsi-specific actions
-
 ## Browser support
 
 Right now, the SDK is compatible with the latest version of Chromium based browsers (Chrome, Edge, Brave, etc), Firefox and Safari.
