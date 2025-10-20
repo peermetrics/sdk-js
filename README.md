@@ -26,7 +26,8 @@ You can read more about the service on [peermetrics.io](https://peermetrics.io/)
    8. [SimplePeer](#simplepeer)
 4. [Browser support](#browser-support)
 5. [Use cases](#use-cases)
-6. [License](#license)
+6. [Documentation](#documentation)
+7. [License](#license)
 
 
 
@@ -539,6 +540,15 @@ For example:
 6. Continue from step `3`
 
 
+
+## Documentation
+
+For comprehensive documentation including detailed API reference, architecture overview, and development guidelines, see the [`docs/`](./docs/) folder:
+
+- **[API Reference](./docs/api-reference.md)** - Complete API documentation with examples
+- **[Integration Guides](./docs/integrations.md)** - Detailed integration patterns for WebRTC SDKs
+- **[Architecture](./docs/architecture.md)** - System design and component overview
+- **[Development Guide](./docs/development.md)** - Coding standards, testing, and contribution guidelines
 
 ## License
 MIT
