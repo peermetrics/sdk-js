@@ -436,8 +436,8 @@ To integrate with [Jitsi Meet](https://jitsi.org/jitsi-meet/), you can use the b
 <!-- Load PeerMetrics SDK -->
 <script src="//cdn.peermetrics.io/js/sdk/peermetrics.min.js"></script>
 
-<!-- Load Jitsi Meet External API -->
-<script src="https://meet.jit.si/external_api.js"></script>
+<!-- Load Jitsi Meet SDK -->
+<script src="https://meet.jit.si/libs/lib-jitsi-meet.min.js"></script>
 
 <script>
 (async () => {
@@ -448,7 +448,8 @@ To integrate with [Jitsi Meet](https://jitsi.org/jitsi-meet/), you can use the b
         userName: 'John Doe',
         conferenceId: 'room-123',
         conferenceName: 'My Conference',
-        debug: true
+        debug: true,
+        wrapPeerConnection: true  // Enable automatic WebRTC connection wrapping
     })
 
     await peerMetrics.initialize()
@@ -461,16 +462,39 @@ To integrate with [Jitsi Meet](https://jitsi.org/jitsi-meet/), you can use the b
         }
     })
 
-    // Initialize Jitsi Meet
-    const domain = 'meet.jit.si'
-    const options = {
-        roomName: 'MyRoom',
-        width: '100%',
-        height: 500,
-        parentNode: document.querySelector('#jitsi-container')
-    }
-    
-    const api = new JitsiMeetExternalAPI(domain, options)
+    // Initialize Jitsi Meet SDK
+    JitsiMeetJS.init({
+        analytics: {
+            rtcstatsEnabled: true,
+            rtcstatsEndpoint: null // We handle stats via PeerMetrics
+        }
+    })
+
+    // Create Jitsi connection
+    const connection = new JitsiMeetJS.JitsiConnection(null, null, {
+        hosts: {
+            domain: 'meet.jit.si',
+            muc: 'conference.meet.jit.si'
+        },
+        serviceUrl: 'https://meet.jit.si/http-bind'
+    })
+
+    // Create room (room name must be lowercase and alphanumeric only)
+    const room = connection.initJitsiConference('myroom', {
+        openBridgeChannel: true
+    })
+
+    // Set up event listeners
+    connection.addEventListener(JitsiMeetJS.events.connection.CONNECTION_ESTABLISHED, () => {
+        room.join()
+    })
+
+    room.addEventListener(JitsiMeetJS.events.conference.CONFERENCE_JOINED, () => {
+        console.log('Joined Jitsi room successfully')
+    })
+
+    // Connect to Jitsi
+    connection.connect()
     
     // WebRTC connections will be automatically captured by PeerMetrics!
 })()
