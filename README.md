@@ -464,10 +464,7 @@ To integrate with [Jitsi Meet](https://jitsi.org/jitsi-meet/), you can use the b
 
     // Initialize Jitsi Meet SDK
     JitsiMeetJS.init({
-        analytics: {
-            rtcstatsEnabled: true,
-            rtcstatsEndpoint: null // We handle stats via PeerMetrics
-        }
+        // Basic initialization - PeerMetrics will handle stats collection
     })
 
     // Create Jitsi connection

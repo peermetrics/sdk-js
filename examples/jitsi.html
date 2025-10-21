@@ -127,14 +127,10 @@
                     await initPeerMetrics()
                 }
                 
-                // Initialize Jitsi Meet SDK with proper options
-                const initOptions = {
-                    analytics: {
-                        rtcstatsEnabled: true,
-                        rtcstatsEndpoint: null // We'll handle stats via PeerMetrics
-                    }
-                }
-                JitsiMeetJS.init(initOptions)
+                // Initialize Jitsi Meet SDK
+                JitsiMeetJS.init({
+                    // Basic initialization - PeerMetrics will handle stats collection
+                })
                 
                 // Create connection with minimal configuration for public Jitsi server
                 const connection = new JitsiMeetJS.JitsiConnection(null, null, {
