@@ -265,6 +265,10 @@ export default class SdkIntegration extends EventEmitter {
         serverId = this.checkServerId(serverId);
         serverName = this.checkServerName(serverName);
 
+        if (!peerConnectionEventEmitter) {
+            throw new Error("Could not integrate with Pion. Please make sure you set PeerMetricsOptions.wrapPeerConnection before loading the PeerMetrics script.");
+        }
+
         peerConnectionEventEmitter.on('newRTCPeerconnection', (pc) => {
             this.emit('newConnection', {
                 pc: pc,

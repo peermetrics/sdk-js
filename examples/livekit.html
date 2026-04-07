@@ -256,7 +256,7 @@
                 setTimeout(async () => {
                     try {
                         log('🔍 Attempting to manually detect LiveKit WebRTC connections...')
-                        const connectionsFound = await peerMetrics.autoDetectConnections()
+                        const connectionsFound = await peerMetrics.autoDetectConnections({ isSfu: true })
                         if (connectionsFound > 0) {
                             log(`✅ Auto-detected ${connectionsFound} additional WebRTC connections`)
                         } else {

@@ -16,6 +16,7 @@ import type {
   SdkIntegrationInterface,
   WebrtcSDKs,
   AddConnectionOptions,
+  AutoDetectConnectionsOptions,
   RemoveConnectionOptions,
   SessionData,
   PageEvents,
@@ -23,7 +24,7 @@ import type {
   PeersToMonitor
 } from './types/index'
 
-export {PeerMetricsConstructor, AddConnectionOptions, AddEventOptions}
+export {PeerMetricsConstructor, AddConnectionOptions, AddEventOptions, AutoDetectConnectionsOptions}
 
 /**
  * Used to keep track of peers
@@ -272,11 +273,11 @@ export class PeerMetrics {
   }
 
   /**
-   * Automatically detect and add WebRTC connections from any source
-   * This method searches for RTCPeerConnection instances in various places
-   * @return {Promise<number>} Number of connections found and added
+   * Automatically detect and add WebRTC connections from common SDK shapes and globals.
+   * By default does not walk the entire `window` object (use `scanBrowserGlobals` to opt in).
+   * @return {Promise<number>} Number of connections successfully added
    */
-  async autoDetectConnections(): Promise<number> {
+  async autoDetectConnections(options: AutoDetectConnectionsOptions = {}): Promise<number> {
     if (!this._initialized) {
       throw new Error('SDK not initialized. Please call initialize() first.')
     }
@@ -285,74 +286,78 @@ export class PeerMetrics {
       throw new Error('The stats module is not instantiated yet.')
     }
 
-    log('🔍 Auto-detecting WebRTC connections...')
-    const connections = []
-    
-    // Method 1: Search in common global objects
-    const searchInObject = (obj, path = '', maxDepth = 5) => {
+    const isSfu = options.isSfu === true
+    const scanBrowserGlobals = options.scanBrowserGlobals === true
+
+    log('Auto-detecting WebRTC connections...')
+    const connections: { pc: RTCPeerConnection; peerId: string; source: string }[] = []
+    const seenPC = new WeakSet<RTCPeerConnection>()
+
+    const pushConnection = (pc: RTCPeerConnection, peerId: string, source: string) => {
+      if (seenPC.has(pc)) return
+      seenPC.add(pc)
+      connections.push({ pc, peerId, source })
+    }
+
+    const searchInObject = (obj: object, path: string, maxDepth: number) => {
       if (maxDepth <= 0 || !obj || typeof obj !== 'object') return
-      
+
       try {
         for (const [key, value] of Object.entries(obj)) {
           if (value instanceof RTCPeerConnection) {
-            connections.push({ 
-              pc: value, 
-              peerId: `${path}.${key}`.replace(/^\./, '') || 'detected-connection',
-              source: 'global-search'
-            })
-            log(`✅ Found RTCPeerConnection at: ${path}.${key}`)
+            const id = `${path}.${key}`.replace(/^\./, '') || 'detected-connection'
+            pushConnection(value, id, 'global-search')
+            log('Found RTCPeerConnection at:', `${path}.${key}`)
           } else if (value && typeof value === 'object' && !Array.isArray(value)) {
-            // Recursively search but limit depth
             searchInObject(value, `${path}.${key}`, maxDepth - 1)
           }
         }
-      } catch (error) {
+      } catch {
         // Ignore access errors (e.g., private properties)
       }
     }
 
-    // Search in common places where WebRTC connections might be stored
-    const searchTargets = [
-      { obj: window, name: 'window' },
+    const sdkSearchTargets = [
       { obj: window.JitsiMeetJS, name: 'JitsiMeetJS' },
       { obj: window.LiveKit, name: 'LiveKit' },
       { obj: window.Twilio, name: 'Twilio' },
       { obj: window.AgoraRTC, name: 'AgoraRTC' }
     ]
 
-    for (const target of searchTargets) {
+    if (scanBrowserGlobals) {
+      searchInObject(window, 'window', 3)
+    }
+
+    for (const target of sdkSearchTargets) {
       if (target.obj) {
-        searchInObject(target.obj, target.name)
+        searchInObject(target.obj as object, target.name, 3)
       }
     }
 
-    // Method 2: Try to find connections in known SDK patterns
-    this._searchKnownSDKPatterns(connections)
+    this._searchKnownSDKPatterns(pushConnection)
 
-    // Method 3: Look for connections created after our wrap
-    if (peerConnectionEventEmitter) {
-      // The wrapPeerConnection already captures new connections
-      // This is handled automatically by the event emitter
-    }
-
-    // Add all found connections to PeerMetrics
     let addedCount = 0
     for (const { pc, peerId, source } of connections) {
       try {
         await this.addConnection({
-          pc: pc,
-          peerId: peerId,
+          pc,
+          peerId,
           peerName: `Auto-detected (${source})`,
-          isSfu: true
+          ...(isSfu ? { isSfu: true } : {})
         })
         addedCount++
-        log(`✅ Added auto-detected connection: ${peerId}`)
-      } catch (error) {
-        log(`❌ Failed to add connection ${peerId}: ${error.message}`)
+        log('Added auto-detected connection:', peerId)
+      } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : String(error)
+        if (/already monitoring/i.test(msg)) {
+          log('Skipped auto-detected connection (already monitored):', peerId)
+          continue
+        }
+        log('Failed to add auto-detected connection', peerId, msg)
       }
     }
 
-    log(`📡 Auto-detection complete: ${addedCount}/${connections.length} connections added`)
+    log(`Auto-detection complete: ${addedCount}/${connections.length} connections added`)
     return addedCount
   }
 
@@ -360,53 +365,45 @@ export class PeerMetrics {
    * Search for WebRTC connections in known SDK patterns
    * @private
    */
-  private _searchKnownSDKPatterns(connections: any[]) {
-    // Jitsi Meet patterns
+  private _searchKnownSDKPatterns(
+    pushConnection: (pc: RTCPeerConnection, peerId: string, source: string) => void
+  ) {
     if (window.JitsiMeetJS && window.JitsiMeetJS.app) {
       try {
         const app = window.JitsiMeetJS.app
         if (app._room && app._room.rtc) {
-          this._searchJitsiConnections(app._room.rtc, connections)
+          this._searchJitsiConnections(app._room.rtc, pushConnection)
         }
-      } catch (error) {
+      } catch {
         log('Could not access Jitsi room object')
       }
     }
 
-    // LiveKit patterns
     if (window.LiveKit) {
       try {
-        // Search for room instances
         const rooms = document.querySelectorAll('[data-livekit-room]')
         rooms.forEach((roomEl, index) => {
           const room = (roomEl as any).livekitRoom
           if (room && room.engine) {
-            this._searchLiveKitConnections(room.engine, connections, index)
+            this._searchLiveKitConnections(room.engine, pushConnection, index)
           }
         })
-      } catch (error) {
+      } catch {
         log('Could not access LiveKit room objects')
       }
     }
 
-    // Twilio Video patterns
     if (window.Twilio) {
       try {
-        // Search for room instances in global scope
-        const searchTwilio = (obj, path = '') => {
+        const searchTwilio = (obj: object, path = '') => {
           if (obj && typeof obj === 'object') {
-            if (obj._peerConnections && obj._peerConnections instanceof Map) {
-              for (const [key, pc] of obj._peerConnections) {
+            if ((obj as any)._peerConnections && (obj as any)._peerConnections instanceof Map) {
+              for (const [key, pc] of (obj as any)._peerConnections) {
                 if (pc && pc._peerConnection && pc._peerConnection instanceof RTCPeerConnection) {
-                  connections.push({
-                    pc: pc._peerConnection,
-                    peerId: `twilio-${path}-${key}`,
-                    source: 'twilio-pattern'
-                  })
+                  pushConnection(pc._peerConnection, `twilio-${path}-${key}`, 'twilio-pattern')
                 }
               }
             }
-            // Recursively search
             Object.entries(obj).forEach(([key, value]) => {
               if (value && typeof value === 'object' && path.length < 10) {
                 searchTwilio(value, `${path}.${key}`)
@@ -415,7 +412,7 @@ export class PeerMetrics {
           }
         }
         searchTwilio(window.Twilio)
-      } catch (error) {
+      } catch {
         log('Could not access Twilio objects')
       }
     }
@@ -425,7 +422,10 @@ export class PeerMetrics {
    * Search for Jitsi WebRTC connections
    * @private
    */
-  private _searchJitsiConnections(rtc, connections: any[]) {
+  private _searchJitsiConnections(
+    rtc: any,
+    pushConnection: (pc: RTCPeerConnection, peerId: string, source: string) => void
+  ) {
     const possiblePaths = [
       ['peerConnections'],
       ['pc'],
@@ -449,17 +449,17 @@ export class PeerMetrics {
         if (current instanceof Map) {
           for (const [peerId, pc] of current) {
             if (pc instanceof RTCPeerConnection) {
-              connections.push({ pc, peerId: `jitsi-${peerId}`, source: 'jitsi-pattern' })
+              pushConnection(pc, `jitsi-${peerId}`, 'jitsi-pattern')
             }
           }
         } else if (Array.isArray(current)) {
           current.forEach((pc, index) => {
             if (pc instanceof RTCPeerConnection) {
-              connections.push({ pc, peerId: `jitsi-${index}`, source: 'jitsi-pattern' })
+              pushConnection(pc, `jitsi-${index}`, 'jitsi-pattern')
             }
           })
         } else if (current instanceof RTCPeerConnection) {
-          connections.push({ pc: current, peerId: 'jitsi-main', source: 'jitsi-pattern' })
+          pushConnection(current, 'jitsi-main', 'jitsi-pattern')
         }
       }
     }
@@ -469,23 +469,19 @@ export class PeerMetrics {
    * Search for LiveKit WebRTC connections
    * @private
    */
-  private _searchLiveKitConnections(engine, connections: any[], roomIndex: number) {
+  private _searchLiveKitConnections(
+    engine: any,
+    pushConnection: (pc: RTCPeerConnection, peerId: string, source: string) => void,
+    roomIndex: number
+  ) {
     try {
       if (engine.publisher && engine.publisher.pc) {
-        connections.push({
-          pc: engine.publisher.pc,
-          peerId: `livekit-publisher-${roomIndex}`,
-          source: 'livekit-pattern'
-        })
+        pushConnection(engine.publisher.pc, `livekit-publisher-${roomIndex}`, 'livekit-pattern')
       }
       if (engine.subscriber && engine.subscriber.pc) {
-        connections.push({
-          pc: engine.subscriber.pc,
-          peerId: `livekit-subscriber-${roomIndex}`,
-          source: 'livekit-pattern'
-        })
+        pushConnection(engine.subscriber.pc, `livekit-subscriber-${roomIndex}`, 'livekit-pattern')
       }
-    } catch (error) {
+    } catch {
       log('Could not access LiveKit engine connections')
     }
   }

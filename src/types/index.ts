@@ -110,6 +110,20 @@ export interface AddConnectionOptions {
     isSfu?: boolean
 }
 
+/** Options for PeerMetrics.autoDetectConnections() */
+export interface AutoDetectConnectionsOptions {
+    /**
+     * When true, treat detected connections as SFU-side (e.g. server transports).
+     * Default false so plain P2P / unknown stacks are not mislabeled.
+     */
+    isSfu?: boolean
+    /**
+     * When true, recursively walks `window` (expensive; may invoke framework getters).
+     * Default false — only known SDK globals and patterns are scanned.
+     */
+    scanBrowserGlobals?: boolean
+}
+
 export interface RemoveConnectionOptions {
     pc?: RTCPeerConnection
     connectionId?: string
