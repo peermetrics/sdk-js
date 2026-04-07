@@ -23,6 +23,7 @@ You can read more about the service on [peermetrics.io](https://peermetrics.io/)
    5. [Vonage](#vonage)
    6. [Agora](#agora)
    7. [Jitsi Meet](#jitsi-meet)
+   8. [Pion](#pion)
 4. [Browser support](#browser-support)
 5. [Use cases](#use-cases)
 6. [Documentation](#documentation)
@@ -496,6 +497,39 @@ To integrate with [Jitsi Meet](https://jitsi.org/jitsi-meet/), you can use the b
     // WebRTC connections will be automatically captured by PeerMetrics!
 })()
 </script>
+```
+
+### Pion
+
+Integrating with Pion is dead simple. If for example you are using [ion sdk js](https://github.com/pion/ion-sdk-js), just initialize peer metrics first and you are good to go:
+
+```js
+import { Client, LocalStream, RemoteStream } from 'ion-sdk-js';
+import { IonSFUJSONRPCSignal } from 'ion-sdk-js/lib/signal/json-rpc-impl';
+import { PeerMetrics } from '@peermetrics/sdk'
+
+let peerMetrics = new PeerMetrics({...})
+await peerMetrics.initialize()
+
+peerMetrics.addSdkIntegration({
+    pion: true
+})
+
+// then continue with the usual things
+const signal = new IonSFUJSONRPCSignal("wss://ion-sfu:7000/ws");
+const client = new Client(signal);
+signal.onopen = () => client.join("test session", "test uid")
+```
+
+You can pass additional details to `addSdkIntegration()` to better identify the SFU server the user is connecting to:
+
+```js
+peerMetrics.addSdkIntegration({
+    pion: {
+        serverId: 'pion-sfu-na',
+        serverName: 'Pion SFU North America'
+    }
+})
 ```
 
 ## Browser support

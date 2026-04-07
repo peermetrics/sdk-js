@@ -10,6 +10,7 @@ import type {
 export default class SdkIntegration extends EventEmitter {
     foundIntegration: boolean = false
     webrtcSDK: WebrtcSDKs
+    private _emittedPCs: WeakSet<RTCPeerConnection> = new WeakSet()
 
     addIntegration(options: SdkIntegrationInterface, peerConnectionEventEmitter: null | EventEmitter): boolean {
 
@@ -281,46 +282,46 @@ export default class SdkIntegration extends EventEmitter {
     addJitsiIntegration(options: SdkIntegrationInterface['jitsi'], peerConnectionEventEmitter: EventEmitter) {
         if (!options) return
 
-        // if the user sent just a boolean, use the default values for server id/name
         if (typeof options === 'boolean') {
             options = {}
         }
 
         let { serverId = 'jitsi-sfu-server', serverName = 'Jitsi SFU Server' } = options;
 
-        serverId = this.checkServerId(serverId);
-        serverName = this.checkServerName(serverName);
+        let peerId = this.checkServerId(serverId);
+        let peerName = this.checkServerName(serverName);
 
         if (!peerConnectionEventEmitter) {
             throw new Error("Could not integrate with Jitsi. Please make sure you set PeerMetricsOptions.wrapPeerConnection before loading the PeerMetrics script.");            
         }
 
-        // Listen for new RTCPeerConnection instances created by Jitsi
         peerConnectionEventEmitter.on('newRTCPeerconnection', (pc) => {
-            this._addJitsiConnection(pc, serverId, serverName)
+            this._addJitsiConnection(pc, peerId, peerName)
         })
 
-        // Search for existing Jitsi connections
-        this._searchExistingJitsiConnections(serverId, serverName)
+        this._searchExistingJitsiConnections(peerId, peerName)
 
         this.webrtcSDK = 'jitsi';
         this.foundIntegration = true;
     }
 
-    _addJitsiConnection(pc, serverId, serverName) {
+    _addJitsiConnection(pc, peerId, peerName) {
+        if (this._emittedPCs.has(pc)) return
+        this._emittedPCs.add(pc)
+
         this.emit('newConnection', {
-            pc: pc,
-            peerId: serverId,
-            peerName: serverName,
+            pc,
+            peerId,
+            peerName,
             isSfu: true,
             remote: true
         })
     }
 
-    _searchExistingJitsiConnections(serverId, serverName) {
+    _searchExistingJitsiConnections(peerId, peerName) {
         try {
             if (window.JitsiMeetJS?.app?._room?.rtc) {
-                this._searchExistingJitsiConnectionsInternal(window.JitsiMeetJS.app._room.rtc, serverId, serverName)
+                this._searchExistingJitsiConnectionsInternal(window.JitsiMeetJS.app._room.rtc, peerId, peerName)
             }
         } catch (error) {
             // Jitsi not ready yet, connections will be captured via event emitter
@@ -331,7 +332,7 @@ export default class SdkIntegration extends EventEmitter {
      * Search for existing Jitsi WebRTC connections
      * @private
      */
-    private _searchExistingJitsiConnectionsInternal(rtc, serverId: string, serverName: string) {
+    private _searchExistingJitsiConnectionsInternal(rtc, peerId: string, peerName: string) {
         const possiblePaths = [
             ['peerConnections'],
             ['pc'],
@@ -353,37 +354,19 @@ export default class SdkIntegration extends EventEmitter {
 
             if (current && typeof current === 'object') {
                 if (current instanceof Map) {
-                    for (const [peerId, pc] of current) {
+                    for (const [, pc] of current) {
                         if (pc instanceof RTCPeerConnection) {
-                            this.emit('newConnection', {
-                                pc: pc,
-                                peerId: `${serverId}-${peerId}`,
-                                peerName: serverName,
-                                isSfu: true,
-                                remote: true
-                            })
+                            this._addJitsiConnection(pc, peerId, peerName)
                         }
                     }
                 } else if (Array.isArray(current)) {
-                    current.forEach((pc, index) => {
+                    current.forEach((pc) => {
                         if (pc instanceof RTCPeerConnection) {
-                            this.emit('newConnection', {
-                                pc: pc,
-                                peerId: `${serverId}-${index}`,
-                                peerName: serverName,
-                                isSfu: true,
-                                remote: true
-                            })
+                            this._addJitsiConnection(pc, peerId, peerName)
                         }
                     })
                 } else if (current instanceof RTCPeerConnection) {
-                    this.emit('newConnection', {
-                        pc: current,
-                        peerId: serverId,
-                        peerName: serverName,
-                        isSfu: true,
-                        remote: true
-                    })
+                    this._addJitsiConnection(current, peerId, peerName)
                 }
             }
         }
