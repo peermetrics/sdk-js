@@ -14,12 +14,26 @@
       #callButton { background: #2196F3; color: white; }
       #hangupButton { background: #f44336; color: white; }
       button:disabled { background: #ccc; cursor: not-allowed; }
+      .hint {
+        font-size: 14px; line-height: 1.5; color: #444;
+        background: #f0f7ff; border-left: 4px solid #2196F3;
+        padding: 12px 14px; margin: 0 0 16px 0; border-radius: 6px;
+      }
+      .hint code { font-size: 13px; }
     </style>
   </head>
 
   <body>
     <div class="container">
       <h1>PeerMetrics SDK - Basic WebRTC</h1>
+      <p class="hint">
+        This page simulates <strong>two peers in one browser</strong> (two <code>RTCPeerConnection</code>s, two
+        <code>getUserMedia</code> streams). PeerMetrics only monitors <strong>one</strong> of them (the answerer,
+        <code>pc2</code>) so the dashboard shows <strong>two</strong> participants: you and one synthetic remote
+        peer. The other leg exists only to complete the call in-process. For full two-party telemetry, use two browsers
+        or devices. If the peer row still looks empty, the API may not be storing stats for this loopback shape; check
+        network responses for <code>/stats</code> and <code>/connection</code>.
+      </p>
       <div class="videos">
         <div>
           <h3>Local Video</h3>
@@ -38,145 +52,200 @@
     </div>
     <script>
       (async () => {
-        window.stats = new PeerMetrics({
-          apiKey: '7090df95bcd247f4aa735779636b2028',
-          userId: '1',
-          userName: 'Socrates',
-          conferenceId: '1',
-          conferenceName: 'conf test 6',
-          appVersion: '0.0.1',
-          remote: true,
-          // max 5, only string, number, bool
-          meta: {
-              isRegistered: true,
-              recordingId: '22133432'
-          },
-          pageEvents: {
-              pageVisibility: false
-          },
-          debug: true,
-          mockRequests: true
-        })
-
-        await window.stats.initialize()
-      })()
-    </script>
-
-    <script>
-      (async () => {
         'use strict';
 
-        // simple example
-        const startButton = document.getElementById('startButton');
-        const callButton = document.getElementById('callButton');
-        const hangupButton = document.getElementById('hangupButton');
-        callButton.disabled = true;
-        hangupButton.disabled = true;
-        startButton.addEventListener('click', start);
-        callButton.addEventListener('click', call);
-        hangupButton.addEventListener('click', hangup);
+        function randomToken () {
+          if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+            return crypto.randomUUID()
+          }
+          return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 12)
+        }
 
-        const localVideo = document.getElementById('localVideo');
-        const remoteVideo = document.getElementById('remoteVideo');
+        /** New ids and display name for each Start Call (after Hang Up, the next call gets another set). */
+        function nextSessionLabels () {
+          const t = randomToken()
+          return {
+            userId: 'user-' + t,
+            userName: 'Guest-' + randomToken().replace(/-/g, '').slice(0, 10),
+            conferenceId: 'conf-' + t,
+            conferenceName: 'basic-webrtc ' + new Date().toISOString(),
+            recordingId: 'rec-' + randomToken()
+          }
+        }
 
-        let localStream;
-        let remoteStream;
-        let pc1;
-        let pc2;
+        const sessionMeta = {
+          isRegistered: true,
+          recordingId: 'pending'
+        }
+
+        window.stats = new PeerMetrics({
+          /**
+           * API base URL (must end with /v1). Default in the SDK is https://api.peermetrics.io/v1 (cloud).
+           */
+          apiRoot: 'http://localhost:8081/v1',
+          apiKey: 'c4d00fa8c1d14c8d9c0dc72a0cab222e',
+          userId: 'pending',
+          userName: 'pending',
+          conferenceId: 'pending',
+          conferenceName: 'pending',
+          appVersion: '0.0.1',
+          remote: true,
+          meta: sessionMeta,
+          pageEvents: {
+            pageVisibility: false
+          },
+          debug: true,
+          mockRequests: false
+        })
+
+        const startButton = document.getElementById('startButton')
+        const callButton = document.getElementById('callButton')
+        const hangupButton = document.getElementById('hangupButton')
+        callButton.disabled = true
+        hangupButton.disabled = true
+        startButton.addEventListener('click', start)
+        callButton.addEventListener('click', () => { call() })
+        hangupButton.addEventListener('click', () => { hangup() })
+
+        const localVideo = document.getElementById('localVideo')
+        const remoteVideo = document.getElementById('remoteVideo')
+
+        let localStream
+        let remoteStream
+        let pc1
+        let pc2
+        let peerMetricsSessionActive = false
+
         const offerOptions = {
           offerToReceiveAudio: 1,
           offerToReceiveVideo: 1
-        };
+        }
 
         const gUMConstraints = {
           audio: true,
           video: true
         }
 
-        function getOtherPc(pc) {
-          return (pc === pc1) ? pc2 : pc1;
+        async function startPeerMetricsForCall () {
+          const s = nextSessionLabels()
+          window.stats.user.userId = s.userId
+          window.stats.user.userName = s.userName
+          sessionMeta.recordingId = s.recordingId
+          await window.stats.initialize({
+            conferenceId: s.conferenceId,
+            conferenceName: s.conferenceName
+          })
+          peerMetricsSessionActive = true
         }
 
-        async function start() {
-          // console.log('Requesting local stream');
-          startButton.disabled = true;
+        function getOtherPc (pc) {
+          return (pc === pc1) ? pc2 : pc1
+        }
+
+        async function start () {
+          startButton.disabled = true
           try {
-            localStream = await navigator.mediaDevices.getUserMedia(gUMConstraints);
+            localStream = await navigator.mediaDevices.getUserMedia(gUMConstraints)
             console.log('Got stream for peer 1')
-            remoteStream = await navigator.mediaDevices.getUserMedia(gUMConstraints);
+            remoteStream = await navigator.mediaDevices.getUserMedia(gUMConstraints)
             console.log('Got stream for peer 2')
 
-            localVideo.srcObject = localStream;
-            callButton.disabled = false;
+            localVideo.srcObject = localStream
+            callButton.disabled = false
           } catch (e) {
-            alert(`getUserMedia() error: ${e.name}`);
+            alert(`getUserMedia() error: ${e.name}`)
+            startButton.disabled = false
           }
         }
 
-        async function call() {
-          callButton.disabled = true;
-          hangupButton.disabled = false;
+        async function call () {
+          callButton.disabled = true
+          hangupButton.disabled = false
+
+          try {
+            await startPeerMetricsForCall()
+          } catch (e) {
+            console.error(e)
+            alert(`PeerMetrics initialize() failed: ${e.message}`)
+            callButton.disabled = false
+            hangupButton.disabled = true
+            return
+          }
 
           const configuration = {}
 
-          // peer 1
-          pc1 = new RTCPeerConnection(configuration);
-          pc1.addEventListener('icecandidate', e => onIceCandidate(pc1, e));
+          pc1 = new RTCPeerConnection(configuration)
+          pc1.addEventListener('icecandidate', e => onIceCandidate(pc1, e))
 
-          // peer 2
-          pc2 = new RTCPeerConnection(configuration);
-          pc2.addEventListener('icecandidate', e => onIceCandidate(pc2, e));
-          pc2.addEventListener('track', gotRemoteStream);
+          pc2 = new RTCPeerConnection(configuration)
+          pc2.addEventListener('icecandidate', e => onIceCandidate(pc2, e))
+          pc2.addEventListener('track', gotRemoteStream)
 
-          await stats.addPeer({
-              pc: pc2,
-              peerId: 'peer-2',
-              peerName: 'Peer 2'
+          await window.stats.addPeer({
+            pc: pc2,
+            peerId: 'synthetic-remote',
+            peerName: 'Synthetic remote (same tab)'
           })
 
-          localStream.getTracks().forEach(track => pc1.addTrack(track, localStream));
-          remoteStream.getTracks().forEach(track => pc2.addTrack(track, remoteStream));
+          localStream.getTracks().forEach(track => pc1.addTrack(track, localStream))
+          remoteStream.getTracks().forEach(track => pc2.addTrack(track, remoteStream))
 
-          const offer = await pc1.createOffer(offerOptions);
-          await pc1.setLocalDescription(offer);
+          const offer = await pc1.createOffer(offerOptions)
+          await pc1.setLocalDescription(offer)
 
-          await pc2.setRemoteDescription(offer);
-          const answer = await pc2.createAnswer();
+          await pc2.setRemoteDescription(offer)
+          const answer = await pc2.createAnswer()
 
-          await pc2.setLocalDescription(answer);
-          await pc1.setRemoteDescription(answer);
+          await pc2.setLocalDescription(answer)
+          await pc1.setRemoteDescription(answer)
         }
 
-        function gotRemoteStream(e) {
+        function gotRemoteStream (e) {
           if (remoteVideo.srcObject !== e.streams[0]) {
-            remoteVideo.srcObject = e.streams[0];
+            remoteVideo.srcObject = e.streams[0]
           }
         }
 
-        async function onIceCandidate(pc, event) {
+        async function onIceCandidate (pc, event) {
           if (!event.candidate) return
-          await (getOtherPc(pc).addIceCandidate(event.candidate));
+          await (getOtherPc(pc).addIceCandidate(event.candidate))
         }
 
-        function hangup() {
+        async function hangup () {
+          if (!pc1 || !pc2) {
+            hangupButton.disabled = true
+            callButton.disabled = false
+            return
+          }
+
           let local = pc1.getSenders()
-          for (let rtpSender of local) {
-              if (rtpSender.track) {
-                  rtpSender.track.stop()
-              }
+          for (const rtpSender of local) {
+            if (rtpSender.track) {
+              rtpSender.track.stop()
+            }
           }
           local = pc2.getSenders()
-          for (let rtpSender of local) {
-              if (rtpSender.track) {
-                  rtpSender.track.stop()
-              }
+          for (const rtpSender of local) {
+            if (rtpSender.track) {
+              rtpSender.track.stop()
+            }
           }
-          pc1.close();
-          pc2.close();
-          pc1 = null;
-          pc2 = null;
-          hangupButton.disabled = true;
-          callButton.disabled = false;
+          pc1.close()
+          pc2.close()
+          pc1 = null
+          pc2 = null
+
+          if (peerMetricsSessionActive) {
+            try {
+              await window.stats.endCall()
+            } catch (e) {
+              console.error(e)
+            }
+            peerMetricsSessionActive = false
+          }
+
+          hangupButton.disabled = true
+          callButton.disabled = false
         }
       })()
     </script>
