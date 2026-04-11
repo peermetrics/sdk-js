@@ -103,7 +103,8 @@
         async function initPeerMetrics() {
             try {
                 peerMetrics = new PeerMetrics({
-                    apiKey: 'test-api-key-12345',
+                    apiRoot: 'http://localhost:8081/v1',
+                    apiKey: 'c4d00fa8c1d14c8d9c0dc72a0cab222e',
                     userId: 'livekit-user-' + Math.random().toString(36).substr(2, 9),
                     userName: 'LiveKit User',
                     conferenceId: 'livekit-room-' + Math.random().toString(36).substr(2, 9),

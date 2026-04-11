@@ -79,7 +79,7 @@ class SdkIntegration {
 }
 ```
 
-**Purpose**: Integrate with WebRTC SDKs (LiveKit, Twilio, etc.) for automatic monitoring.
+**Purpose**: Wire PeerMetrics to WebRTC SDKs for automatic monitoring ([integrations](./integrations.md)).
 
 ## 🔄 Data Flow
 

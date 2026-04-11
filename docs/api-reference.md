@@ -11,6 +11,7 @@ class PeerMetrics {
   constructor(options: PeerMetricsConstructor)
   async initialize(options?: InitializeObject): Promise<void>
   async addConnection(options: AddConnectionOptions): Promise<{ connectionId: string }>
+  async autoDetectConnections(options?: AutoDetectConnectionsOptions): Promise<number>
   async removeConnection(options: RemoveConnectionOptions): Promise<void>
   async removePeer(peerId: string): Promise<void>
   async addSdkIntegration(options: SdkIntegrationInterface): Promise<void>
@@ -119,6 +120,20 @@ const { connectionId } = await peerMetrics.addConnection({
 - `Error`: When required parameters are missing
 - `Error`: When peerId matches the current user ID
 
+### autoDetectConnections(options?)
+
+Finds `RTCPeerConnection` instances via SDK globals / known shapes and calls `addConnection` once per PC (deduped).
+
+```typescript
+await peerMetrics.autoDetectConnections() // default: not SFU, no full window scan
+await peerMetrics.autoDetectConnections({ isSfu: true, scanBrowserGlobals: false })
+```
+
+- **isSfu** — pass through to `addConnection` (default: omit).
+- **scanBrowserGlobals** — walk `window` (slow / risky; default off).
+
+Returns `Promise<number>`: how many were added (skips duplicates and “already monitoring”).
+
 ### removeConnection(options)
 
 Stops monitoring a specific connection.
@@ -187,18 +202,12 @@ await peerMetrics.addSdkIntegration({
     serverName: 'Mediasoup SFU Server'
   }
 })
+// janus, vonage, agora, jitsi, pion: see integrations.md (jitsi/pion need wrapPeerConnection)
 ```
 
 #### Parameters
-- **options** (object): Integration configuration
-  - **livekit** (object, optional): LiveKit integration options
-  - **twilioVideo** (object, optional): Twilio Video integration options
-  - **mediasoup** (object, optional): Mediasoup integration options
-  - **janus** (object, optional): Janus integration options
-  - **vonage** (boolean, optional): Vonage integration
-  - **agora** (boolean, optional): Agora integration
-  - **pion** (object, optional): Pion integration options
-  - **simplepeer** (boolean, optional): SimplePeer integration
+- **options** (object): One integration key per call (e.g. **livekit**, **twilioVideo**, **mediasoup**, **janus**, **vonage**, **agora**, **jitsi**, **pion**). **jitsi** / **pion**: `true` or `{ serverId?, serverName? }`.
+- Stacks without an adapter (e.g. **SimplePeer**): use `addConnection({ pc, peerId })` — [integrations.md](./integrations.md).
 
 #### Returns
 - `Promise<void>`: Resolves when integration is complete
@@ -345,6 +354,15 @@ interface AddConnectionOptions {
 }
 ```
 
+### AutoDetectConnectionsOptions
+
+```typescript
+interface AutoDetectConnectionsOptions {
+  isSfu?: boolean
+  scanBrowserGlobals?: boolean
+}
+```
+
 ### RemoveConnectionOptions
 
 ```typescript
@@ -388,11 +406,14 @@ interface SdkIntegrationInterface {
   }
   vonage?: boolean
   agora?: boolean
-  pion?: {
+  pion?: boolean | {
     serverId?: string
     serverName?: string
   }
-  simplepeer?: boolean
+  jitsi?: boolean | {
+    serverId?: string
+    serverName?: string
+  }
 }
 ```
 

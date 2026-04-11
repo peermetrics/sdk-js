@@ -574,8 +574,8 @@ export class PeerMetrics {
     // add the peer to webrtcStats now, so we don't miss any events
     let {connectionId} = await this.webrtcStats.addConnection({peerId, pc})
 
-    // lets not block this function call for this request
-    this._sendAddConnectionRequest({connectionId, options: {pc, peerId, peerName, isSfu}})
+    // Wait for server peer/connection ids so queued timeline events remap before callers continue.
+    await this._sendAddConnectionRequest({connectionId, options: {pc, peerId, peerName, isSfu}})
 
     return {
       connectionId
@@ -885,14 +885,16 @@ export class PeerMetrics {
     monitoredConnections[connectionId] = response.connection_id
     peersToMonitor[peerId].connections.push(response.connection_id)
 
-    // all the events that we captured while waiting for 'addConnection' are here
-    // send them to the server
-    eventQueue.map((event) => {
-      this._handleTimelineEvent(event)
-    })
-
-    // clear the queue
-    eventQueue.length = 0
+    // Events captured before server ack are queued; draining may enqueue follow-ups, so loop.
+    let drainRounds = 0
+    const maxDrainRounds = 50
+    while (eventQueue.length > 0 && drainRounds < maxDrainRounds) {
+      drainRounds++
+      const batch = eventQueue.splice(0, eventQueue.length)
+      for (const event of batch) {
+        this._handleTimelineEvent(event)
+      }
+    }
   }
 
   private _handleTimelineEvent (ev) {

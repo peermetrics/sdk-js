@@ -38,15 +38,8 @@ await peerMetrics.addConnection({
 
 ### With WebRTC SDKs
 ```javascript
-// LiveKit integration
-await peerMetrics.addSdkIntegration({
-    livekit: { room: livekitRoom }
-})
-
-// Twilio Video integration  
-await peerMetrics.addSdkIntegration({
-    twilioVideo: { room: twilioRoom }
-})
+await peerMetrics.addSdkIntegration({ livekit: { room } })
+// Also: twilioVideo, mediasoup, janus, vonage, agora, jitsi, pion — see integrations.md
 ```
 
 ## 🎯 Core Purpose

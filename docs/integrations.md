@@ -2,36 +2,14 @@
 
 ## 🔌 Supported SDKs
 
-The PeerMetrics SDK supports integration with major WebRTC frameworks and SDKs:
-
-- **LiveKit** - Modern WebRTC SFU
-- **Twilio Video** - Twilio's video communication platform
-- **Mediasoup** - High-performance WebRTC SFU
-- **Janus** - WebRTC gateway
-- **Vonage** (OpenTok) - Vonage video platform
-- **Agora** - Agora video platform
+**LiveKit**, **Twilio Video**, **Mediasoup**, **Janus**, **Vonage**, **Agora**, **Jitsi Meet**, **Pion** (Jitsi/Pion use RTCPeerConnection wrapping). **SimplePeer** and custom stacks: use `addConnection` (see end of this page).
 
 ## 🚀 Integration Patterns
 
-### Basic Integration Flow
-
 ```typescript
-// 1. Initialize PeerMetrics
-const peerMetrics = new PeerMetrics({
-  apiKey: 'your-api-key',
-  userId: 'user-123',
-  conferenceId: 'conference-1'
-})
-
-// 2. Initialize the SDK
+const peerMetrics = new PeerMetrics({ apiKey: '…', userId: '…', conferenceId: '…' })
 await peerMetrics.initialize()
-
-// 3. Add SDK integration
-await peerMetrics.addSdkIntegration({
-  // SDK-specific options
-})
-
-// 4. That's it! PeerMetrics will automatically monitor connections
+await peerMetrics.addSdkIntegration({ /* livekit | twilioVideo | … */ })
 ```
 
 ## 📱 LiveKit Integration
@@ -343,47 +321,23 @@ peerMetrics.addSdkIntegration({
 - Agora SDK must be loaded after PeerMetrics
 - Peer connection wrapping must be enabled
 
-## 🚀 Pion Integration
+## 🎦 Jitsi Meet & Pion (wrap-based)
 
-### Setup
+Wrap `RTCPeerConnection` **before** lib-jitsi-meet or your Pion client creates any PC. Use `PeerMetricsOptions.wrapPeerConnection` + script order in HTML, or `PeerMetrics.wrapPeerConnection()` first in a bundler. Then `addSdkIntegration({ jitsi: true })` or `{ pion: true }` (or `{ serverId, serverName }`).
 
 ```typescript
-import { Client, LocalStream, RemoteStream } from 'ion-sdk-js'
-import { IonSFUJSONRPCSignal } from 'ion-sdk-js/lib/signal/json-rpc-impl'
 import { PeerMetrics } from '@peermetrics/sdk'
 
-// Initialize PeerMetrics
-const peerMetrics = new PeerMetrics({
-  apiKey: 'your-api-key',
-  userId: 'user-123',
-  conferenceId: 'room-1'
-})
+PeerMetrics.wrapPeerConnection()
 
+const peerMetrics = new PeerMetrics({ apiKey: '…', userId: '…', conferenceId: '…' })
 await peerMetrics.initialize()
+await peerMetrics.addSdkIntegration({ jitsi: true }) // or { pion: true }
 
-// Enable Pion integration
-peerMetrics.addSdkIntegration({
-  pion: {
-    serverId: 'pion-sfu-na',           // Optional
-    serverName: 'Pion SFU North America' // Optional
-  }
-})
-
-// Continue with Pion setup
-const signal = new IonSFUJSONRPCSignal("wss://ion-sfu:7000/ws")
-const client = new Client(signal)
-signal.onopen = () => client.join("test session", "test uid")
+// Then JitsiMeetJS… or e.g. ion-sdk-js Client / signal.
 ```
 
-### Features
-- **Client Monitoring**: Pion client events
-- **Stream Events**: Audio/video stream events
-- **Connection Quality**: Real-time quality metrics
-- **Error Tracking**: Connection and stream errors
-
-### Requirements
-- Pion SDK must be loaded after PeerMetrics
-- Peer connection wrapping is automatic
+Several PCs can share one **peerId**; **webrtc-stats** still assigns a unique **connectionId** per PC. Without a working wrap, integration throws (same idea as Vonage / Agora).
 
 ## 🔗 SimplePeer Integration
 
