@@ -1,4 +1,5 @@
 import {WebRTCStats} from '@peermetrics/webrtc-stats'
+import type {EventEmitter} from 'events'
 
 // import type { RemoveConnectionOptions } from '@peermetrics/webrtc-stats'
 
@@ -54,7 +55,7 @@ export class PeerMetrics {
 
   private user: User
   private apiWrapper: ApiWrapper
-  private webrtcStats: typeof WebRTCStats
+  private webrtcStats: InstanceType<typeof WebRTCStats>
   private pageEvents: PageEvents
   private _options: PeerMetricsConstructor
   private _initialized: boolean = false
@@ -844,8 +845,9 @@ export class PeerMetrics {
    * Adds event listener for the stats library
    */
   private _addWebrtcStatsEventListeners () {
-    this.webrtcStats
-      // just listen on the timeline and handle them differently
+    // WebRTCStats extends EventEmitter at runtime, but the upstream package ships
+    // without .d.ts so TS can't see the inherited listener methods here.
+    (this.webrtcStats as unknown as EventEmitter)
       .on('timeline', this._handleTimelineEvent.bind(this))
   }
 
