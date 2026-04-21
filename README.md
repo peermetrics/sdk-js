@@ -431,73 +431,37 @@ peerMetrics.addSdkIntegration({
 
 ### Jitsi Meet
 
-To integrate with [Jitsi Meet](https://jitsi.org/jitsi-meet/), you can use the built-in Jitsi integration. The SDK will automatically detect and monitor WebRTC connections created by Jitsi:
+To integrate with [Jitsi Meet](https://jitsi.org/jitsi-meet/), use the built-in Jitsi integration. The SDK will automatically detect and monitor every `RTCPeerConnection` that Jitsi creates.
 
-```html
-<!-- Load PeerMetrics SDK -->
-<script src="//cdn.peermetrics.io/js/sdk/peermetrics.min.js"></script>
+These lines are PeerMetrics-specific:
 
-<!-- Load Jitsi Meet SDK -->
-<script src="https://meet.jit.si/libs/lib-jitsi-meet.min.js"></script>
+```js
+const peerMetrics = new PeerMetrics({
+    apiKey: 'your-api-key',
+    userId: 'user-123',
+    userName: 'John Doe',
+    conferenceId: 'room-123',
+    conferenceName: 'My Conference',
+    wrapPeerConnection: true   // let PeerMetrics wrap RTCPeerConnection before Jitsi creates any
+})
+await peerMetrics.initialize()
 
-<script>
-(async () => {
-    // Initialize PeerMetrics
-    const peerMetrics = new PeerMetrics({
-        apiKey: 'your-api-key',
-        userId: 'user-123',
-        userName: 'John Doe',
-        conferenceId: 'room-123',
-        conferenceName: 'My Conference',
-        debug: true,
-        wrapPeerConnection: true  // Enable automatic WebRTC connection wrapping
-    })
+await peerMetrics.addSdkIntegration({
+    jitsi: {
+        serverId: 'jitsi-sfu-server',
+        serverName: 'Jitsi SFU Server'
+    }
+})
 
-    await peerMetrics.initialize()
-
-    // Add Jitsi integration - SDK will automatically wrap RTCPeerConnection
-    await peerMetrics.addSdkIntegration({
-        jitsi: {
-            serverId: 'jitsi-sfu-server',
-            serverName: 'Jitsi SFU Server'
-        }
-    })
-
-    // Initialize Jitsi Meet SDK
-    JitsiMeetJS.init({
-        // Basic initialization - PeerMetrics will handle stats collection
-    })
-
-    // Create Jitsi connection
-    const connection = new JitsiMeetJS.JitsiConnection(null, null, {
-        hosts: {
-            domain: 'meet.jit.si',
-            muc: 'conference.meet.jit.si'
-        },
-        serviceUrl: 'https://meet.jit.si/http-bind'
-    })
-
-    // Create room (room name must be lowercase and alphanumeric only)
-    const room = connection.initJitsiConference('myroom', {
-        openBridgeChannel: true
-    })
-
-    // Set up event listeners
-    connection.addEventListener(JitsiMeetJS.events.connection.CONNECTION_ESTABLISHED, () => {
-        room.join()
-    })
-
-    room.addEventListener(JitsiMeetJS.events.conference.CONFERENCE_JOINED, () => {
-        console.log('Joined Jitsi room successfully')
-    })
-
-    // Connect to Jitsi
-    connection.connect()
-    
-    // WebRTC connections will be automatically captured by PeerMetrics!
-})()
-</script>
+// …then continue with your normal Jitsi Meet SDK flow (JitsiConnection, initJitsiConference, room.join(), etc.)
 ```
+
+Notes:
+- Call `addSdkIntegration({ jitsi })` **before** `connection.connect()` so the wrapping is in place when Jitsi builds peer connections.
+
+See the runnable demo in [`examples/jitsi.html`](./examples/jitsi.html), which lets you point the integration at `meet.jit.si` or a self-hosted Jitsi server.
+
+</details>
 
 ### Pion
 
