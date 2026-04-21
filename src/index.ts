@@ -649,8 +649,15 @@ export class PeerMetrics {
 
     let sdkIntegration = new SdkIntegration()
 
-    sdkIntegration.on('newConnection', (options) => {
-      this.addConnection(options)
+    sdkIntegration.on('newConnection', (opts) => {
+      this.addConnection(opts).catch((e) => log(e))
+    })
+
+    // Jitsi conference-level participant events (opt-in via
+    // `addSdkIntegration({ jitsi: { conference } })`) are forwarded as
+    // regular custom events so the dashboard can render them.
+    sdkIntegration.on('jitsiParticipantEvent', (ev) => {
+      this.addEvent(ev).catch((e) => log(e))
     })
 
     // if we have a pion or jitsi integration, it's safe to wrap the peer connection later

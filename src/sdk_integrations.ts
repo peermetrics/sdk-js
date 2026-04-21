@@ -290,7 +290,7 @@ export default class SdkIntegration extends EventEmitter {
             options = {}
         }
 
-        let { serverId = 'jitsi-sfu-server', serverName = 'Jitsi SFU Server' } = options;
+        let { serverId = 'jitsi-sfu-server', serverName = 'Jitsi SFU Server', conference } = options;
 
         let peerId = this.checkServerId(serverId);
         let peerName = this.checkServerName(serverName);
@@ -304,6 +304,13 @@ export default class SdkIntegration extends EventEmitter {
         })
 
         this._searchExistingJitsiConnections(peerId, peerName)
+
+        // Opt-in: forward Jitsi participant lifecycle events as SDK custom
+        // events so the dashboard can surface remote participants even
+        // though the SFU transport is monitored as a single peer.
+        if (conference) {
+            this._attachJitsiConferenceEvents(conference)
+        }
 
         this.webrtcSDK = 'jitsi';
         this.foundIntegration = true;
@@ -319,6 +326,52 @@ export default class SdkIntegration extends EventEmitter {
             peerName,
             isSfu: true,
             remote: true
+        })
+    }
+
+    /**
+     * Subscribe to a `JitsiConference` instance and relay user-level events
+     * as SDK custom events. This gives the dashboard visibility into remote
+     * participants without changing how the transport PC itself is
+     * monitored.
+     */
+    private _attachJitsiConferenceEvents(conference: any) {
+        const events = (typeof window !== 'undefined' && (window as any).JitsiMeetJS?.events?.conference) || {}
+
+        const safeOn = (eventName: string, handler: (...args: any[]) => void) => {
+            if (!eventName) return
+            try {
+                if (typeof conference.on === 'function') {
+                    conference.on(eventName, handler)
+                } else if (typeof conference.addEventListener === 'function') {
+                    conference.addEventListener(eventName, handler)
+                }
+            } catch {
+                // best-effort: integration still works without these events
+            }
+        }
+
+        safeOn(events.USER_JOINED, (id: string, participant: any) => {
+            this.emit('jitsiParticipantEvent', {
+                eventName: 'jitsiUserJoined',
+                participantId: id,
+                displayName: typeof participant?.getDisplayName === 'function' ? participant.getDisplayName() : undefined
+            })
+        })
+
+        safeOn(events.USER_LEFT, (id: string) => {
+            this.emit('jitsiParticipantEvent', {
+                eventName: 'jitsiUserLeft',
+                participantId: id
+            })
+        })
+
+        safeOn(events.DISPLAY_NAME_CHANGED, (id: string, displayName: string) => {
+            this.emit('jitsiParticipantEvent', {
+                eventName: 'jitsiDisplayNameChanged',
+                participantId: id,
+                displayName
+            })
         })
     }
 

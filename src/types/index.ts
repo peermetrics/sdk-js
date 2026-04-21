@@ -61,6 +61,16 @@ export interface PionIntegrationInterface {
 export interface JitsiIntegrationInterface {
     serverId?: string
     serverName?: string
+    /**
+     * Optional reference to the active `JitsiConference` instance.
+     *
+     * When provided, the integration listens to `USER_JOINED` / `USER_LEFT`
+     * events and forwards them as custom events so remote participants are
+     * visible in the dashboard even though the SFU transport is monitored as
+     * a single peer. When omitted, the integration still works but only
+     * reports the transport.
+     */
+    conference?: any
 }
 
 export interface SdkIntegrationInterface {

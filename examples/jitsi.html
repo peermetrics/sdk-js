@@ -277,15 +277,9 @@
                 
                 await peerMetrics.initialize()
                 log('✅ PeerMetrics initialized successfully')
-                
-                // Add Jitsi integration using the SDK's built-in method
-                await peerMetrics.addSdkIntegration({
-                    jitsi: {
-                        serverId: 'jitsi-sfu-server',
-                        serverName: 'Jitsi SFU Server'
-                    }
-                })
-                log('✅ Jitsi integration added — RTCPeerConnections are captured via wrapPeerConnection')
+                // Note: addSdkIntegration is deferred until after the JitsiConference
+                // is created so we can pass the `conference` instance and receive
+                // USER_JOINED / USER_LEFT events for the dashboard.
                 if (peermetricsUseMock) {
                     log('ℹ️ PeerMetrics mockRequests: true (no HTTP). Set PEERMETRICS_API_KEY to send stats.')
                 }
@@ -345,6 +339,26 @@
 
             const conferenceConfig = buildConferenceConfigFromDeployment(deployment)
             room = connection.initJitsiConference(roomName, conferenceConfig)
+
+            // Register the Jitsi integration now that we have a real JitsiConference.
+            // Passing `conference` lets PeerMetrics forward USER_JOINED / USER_LEFT /
+            // DISPLAY_NAME_CHANGED to the dashboard, which is the only way to surface
+            // per-remote-user presence in an SFU call (the transport itself is a single PC).
+            if (peerMetrics && !peerMetrics.__jitsiIntegrationAdded) {
+                try {
+                    await peerMetrics.addSdkIntegration({
+                        jitsi: {
+                            serverId: 'jitsi-sfu-server',
+                            serverName: 'Jitsi SFU Server',
+                            conference: room
+                        }
+                    })
+                    peerMetrics.__jitsiIntegrationAdded = true
+                    log('✅ Jitsi integration added — transport PCs captured via wrapPeerConnection; participant events forwarded from conference')
+                } catch (e) {
+                    log('⚠️ Could not add Jitsi integration: ' + (e && e.message ? e.message : e))
+                }
+            }
 
             room.addEventListener(JitsiMeetJS.events.conference.CONFERENCE_JOIN_IN_PROGRESS, () => {
                 log('⏳ Conference join in progress (MUC connecting…)…')
