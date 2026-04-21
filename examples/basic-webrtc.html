@@ -95,6 +95,7 @@
             pageVisibility: false
           },
           debug: true,
+          // use this if you want to simulate sending metrics to peermetrics server
           mockRequests: false
         })
 
@@ -181,7 +182,7 @@
           pc2.addEventListener('icecandidate', e => onIceCandidate(pc2, e))
           pc2.addEventListener('track', gotRemoteStream)
 
-          await window.stats.addPeer({
+          await window.stats.addConnection({
             pc: pc2,
             peerId: 'synthetic-remote',
             peerName: 'Synthetic remote (same tab)'

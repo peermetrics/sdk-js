@@ -2,10 +2,10 @@
 <html>
 <head>
     <title>PeerMetrics SDK - Jitsi Meet SDK Integration</title>
-    <!-- data-jitsi-meet-deploy: so we can remove and reload config when shard changes (same as full app reload). -->
-    <script src="https://meet.jit.si/config.js" data-jitsi-meet-deploy="1"></script>
+    <!-- PeerMetrics SDK (local build) -->
     <script src="../dist/browser.js"></script>
-    <script src="https://meet.jit.si/libs/lib-jitsi-meet.min.js"></script>
+    <!-- lib-jitsi-meet and its config.js are loaded dynamically from the "Jitsi base URL" below so the example can
+         point at ANY Jitsi deployment (meet.jit.si, self-hosted, JaaS, etc.). -->
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; }
         .container { max-width: 1000px; margin: 0 auto; }
@@ -18,6 +18,12 @@
         .jitsi-media label { display: block; font-size: 12px; color: #666; margin-bottom: 4px; }
         .controls { margin: 10px 0; }
         .info-box { background: #e8f4fd; padding: 15px; margin: 10px 0; border-radius: 8px; border-left: 4px solid #2196F3; }
+        .server-box { background: #fafafa; padding: 12px 14px; margin: 10px 0; border: 1px solid #e0e0e0; border-radius: 6px; }
+        .server-box label { display: block; font-size: 12px; color: #555; margin: 8px 0 2px; }
+        .server-box input { width: 100%; box-sizing: border-box; padding: 8px; font-family: monospace; font-size: 13px; }
+        .server-box summary { cursor: pointer; font-weight: bold; color: #1976D2; }
+        .server-box .row { display: flex; gap: 12px; flex-wrap: wrap; }
+        .server-box .row > div { flex: 1 1 260px; min-width: 0; }
     </style>
 </head>
 <body>
@@ -37,10 +43,32 @@
                 <strong>Note:</strong> Room names must be lowercase and alphanumeric only<br>
                 <strong>Note:</strong> <code>config.js</code> loads in <code>&lt;head&gt;</code> before lib-jitsi-meet. After updating this file, use a <strong>hard refresh</strong> (Ctrl+Shift+R) so the browser does not run an old cached page (old builds used BOSH as <code>serviceUrl</code> and show generic error hints).<br>
                 <strong>Note:</strong> For production, use your own Jitsi deployment and its <code>config.js</code>.<br>
-                <strong>Note:</strong> On <strong>meet.jit.si</strong>, <code>CONFERENCE_FAILED: …membersOnly</code> is common: the service expects meetings to be created in the official web client (often with sign-in), and some rooms are lobby- or members-only. Use a fresh random room name, open the same room once in a browser as moderator, or point this example at your own server.
+                <strong>Note:</strong> On <strong>meet.jit.si</strong>, <code>CONFERENCE_FAILED: …membersOnly</code> is common: the service expects meetings to be created in the official web client (often with sign-in), and some rooms are lobby- or members-only. Use a fresh random room name, open the same room once in a browser as moderator, or <strong>point this example at your own Jitsi server</strong> below.
             </p>
         </div>
-        
+
+        <div class="server-box">
+            <label for="jitsiBaseUrl">Jitsi base URL (server root that serves <code>/config.js</code> and <code>/libs/lib-jitsi-meet.min.js</code>)</label>
+            <input type="url" id="jitsiBaseUrl" placeholder="https://meet.jit.si" value="https://meet.jit.si">
+            <details style="margin-top: 8px;">
+                <summary>Advanced overrides (optional)</summary>
+                <div class="row" style="margin-top: 8px;">
+                    <div>
+                        <label for="jitsiConfigUrl">Custom <code>config.js</code> URL (default: <code>&lt;base&gt;/config.js</code>)</label>
+                        <input type="url" id="jitsiConfigUrl" placeholder="https://meet.jit.si/config.js">
+                    </div>
+                    <div>
+                        <label for="jitsiLibUrl">Custom <code>lib-jitsi-meet.min.js</code> URL (default: <code>&lt;base&gt;/libs/lib-jitsi-meet.min.js</code>)</label>
+                        <input type="url" id="jitsiLibUrl" placeholder="https://meet.jit.si/libs/lib-jitsi-meet.min.js">
+                    </div>
+                </div>
+                <p style="font-size: 12px; color: #666; margin: 8px 0 0;">
+                    These are handy for JaaS (<code>8x8.vc</code>) or self-hosted deployments where the config/lib are served from a different path.
+                </p>
+            </details>
+            <button type="button" id="resetServerBtn" style="margin-top: 8px;">Reset to meet.jit.si</button>
+        </div>
+
         <div class="status" id="status">
             Status: Not connected
         </div>
@@ -83,9 +111,11 @@
         let localTracks = []
         /** @type {ReturnType<typeof setTimeout> | null} */
         let joinHangWatchdog = null
-        const EXAMPLE_BUILD_ID = 'jitsi-example-2026-04-10d'
+        const EXAMPLE_BUILD_ID = 'jitsi-example-2026-04-11a'
         /** @see jitsi/lib-jitsi-meet JitsiConferenceErrors.MEMBERS_ONLY_ERROR */
         const JITSI_MEMBERS_ONLY_ERROR = 'conference.connectionError.membersOnly'
+        const DEFAULT_JITSI_BASE_URL = 'https://meet.jit.si'
+        const LS_PREFIX = 'pmJitsiExample.'
         
         // DOM elements
         const statusEl = document.getElementById('status')
@@ -98,6 +128,13 @@
         const roomNameEl = document.getElementById('roomName')
         const localVideoEl = document.getElementById('localVideo')
         const remoteVideosEl = document.getElementById('remoteVideos')
+        const jitsiBaseUrlEl = document.getElementById('jitsiBaseUrl')
+        const jitsiConfigUrlEl = document.getElementById('jitsiConfigUrl')
+        const jitsiLibUrlEl = document.getElementById('jitsiLibUrl')
+        const resetServerBtn = document.getElementById('resetServerBtn')
+
+        /** Remember the last-loaded lib URL so we only reload the script when it actually changes. */
+        let loadedJitsiLibUrl = null
 
         function disposeLocalTracks() {
             localTracks.forEach((t) => {
@@ -143,52 +180,69 @@
             return c
         }
 
-        /** Remove all deploy scripts and load fresh config (new websocket shard). Required after shardChangedError. */
-        function refreshMeetJitSiConfig() {
+        function normalizeBaseUrl(u) {
+            const raw = String(u || '').trim()
+            if (!raw) return ''
+            return raw.replace(/\/+$/, '')
+        }
+
+        /** Compute the URLs to load given the form inputs (falling back to <base>/config.js etc.). */
+        function getJitsiUrls() {
+            const base = normalizeBaseUrl(jitsiBaseUrlEl.value) || DEFAULT_JITSI_BASE_URL
+            const configUrl = String(jitsiConfigUrlEl.value || '').trim() || (base + '/config.js')
+            const libUrl = String(jitsiLibUrlEl.value || '').trim() || (base + '/libs/lib-jitsi-meet.min.js')
+            return { base, configUrl, libUrl }
+        }
+
+        /** Ensure lib-jitsi-meet from `libUrl` is loaded (once per URL). Re-evaluating the script reuses its globals. */
+        function ensureJitsiLibLoaded(libUrl) {
+            if (typeof JitsiMeetJS !== 'undefined' && loadedJitsiLibUrl === libUrl) {
+                return Promise.resolve()
+            }
             return new Promise((resolve, reject) => {
-                document.querySelectorAll('script[data-jitsi-meet-deploy]').forEach((n) => n.remove())
-                try {
-                    delete window.config
-                } catch (_) {
-                    window.config = undefined
-                }
                 const s = document.createElement('script')
-                s.src = 'https://meet.jit.si/config.js?t=' + Date.now()
+                s.src = libUrl
                 s.async = true
-                s.dataset.jitsiMeetDeploy = '1'
                 s.onload = () => {
-                    if (!(window.config && window.config.websocket && window.config.hosts)) {
-                        reject(new Error('meet.jit.si config reload missing websocket/hosts'))
+                    if (typeof JitsiMeetJS === 'undefined') {
+                        reject(new Error('Script loaded but JitsiMeetJS global missing: ' + libUrl))
                         return
                     }
-                    resolve(window.config)
+                    loadedJitsiLibUrl = libUrl
+                    resolve()
                 }
-                s.onerror = () => reject(new Error('Could not reload meet.jit.si config.js'))
+                s.onerror = () => reject(new Error('Could not load lib-jitsi-meet from ' + libUrl + ' (CORS / blocked?)'))
                 document.head.appendChild(s)
             })
         }
 
-        /** @param {{ forceRefresh?: boolean }} [opts] */
-        function loadMeetJitSiConfig(opts) {
-            if (opts && opts.forceRefresh) {
-                return refreshMeetJitSiConfig()
-            }
-            if (typeof window.config !== 'undefined' && window.config && window.config.websocket && window.config.hosts) {
-                return Promise.resolve(window.config)
-            }
+        /** Remove any previously-loaded deploy config scripts and fetch the given URL fresh (cache-busted). */
+        function loadJitsiConfigScript(configUrl) {
             return new Promise((resolve, reject) => {
+                document.querySelectorAll('script[data-jitsi-meet-deploy]').forEach((n) => n.remove())
+                try { delete window.config } catch (_) { window.config = undefined }
+
                 const s = document.createElement('script')
-                s.src = 'https://meet.jit.si/config.js'
+                const sep = configUrl.indexOf('?') === -1 ? '?' : '&'
+                s.src = configUrl + sep + 't=' + Date.now()
                 s.async = true
                 s.dataset.jitsiMeetDeploy = '1'
                 s.onload = () => {
-                    if (typeof window.config === 'undefined' || !window.config.websocket) {
-                        reject(new Error('meet.jit.si config.js loaded but config is missing websocket'))
+                    if (!window.config || (!window.config.websocket && !window.config.bosh)) {
+                        reject(new Error('Loaded ' + configUrl + ' but window.config lacks websocket/bosh'))
+                        return
+                    }
+                    if (!window.config.websocket) {
+                        reject(new Error('config.js at ' + configUrl + ' only exposes BOSH; this example expects a websocket endpoint'))
+                        return
+                    }
+                    if (!window.config.hosts) {
+                        reject(new Error('config.js at ' + configUrl + ' lacks hosts (domain/muc) — cannot connect'))
                         return
                     }
                     resolve(window.config)
                 }
-                s.onerror = () => reject(new Error('Could not load https://meet.jit.si/config.js (blocked?)'))
+                s.onerror = () => reject(new Error('Could not load ' + configUrl + ' (network / CORS?)'))
                 document.head.appendChild(s)
             })
         }
@@ -242,10 +296,14 @@
         }
         
         async function connectToJitsi(roomName, loadOpts) {
-            const deployment = await loadMeetJitSiConfig(loadOpts)
+            const urls = getJitsiUrls()
+            await ensureJitsiLibLoaded(urls.libUrl)
+            const forceRefresh = !!(loadOpts && loadOpts.forceRefresh)
+            const needConfig = forceRefresh || !(typeof window.config !== 'undefined' && window.config && window.config.websocket && window.config.hosts)
+            const deployment = needConfig ? await loadJitsiConfigScript(urls.configUrl) : window.config
             const baseWs = String(deployment.websocket || '')
             if (!baseWs.startsWith('wss://')) {
-                throw new Error('deployment.websocket is not wss://. Hard-refresh to reload config.js.')
+                throw new Error('deployment.websocket is not wss://. Check config.js served by ' + urls.base + '.')
             }
             const serviceUrl = appendURLParam(baseWs, 'room', roomName)
             const conferenceRequestUrl = deployment.conferenceRequestUrl
@@ -371,11 +429,9 @@
                     await new Promise(r => setTimeout(r, delay))
                     try {
                         if (isShardChange) {
-                            log('🔄 Fetching fresh meet.jit.si config.js (new websocket / shard)…')
-                            await refreshMeetJitSiConfig()
-                            log('✅ Fresh config loaded')
+                            log('🔄 Fetching fresh config.js from ' + getJitsiUrls().configUrl + ' (new websocket / shard)…')
                         }
-                        await connectToJitsi(roomName)
+                        await connectToJitsi(roomName, { forceRefresh: isShardChange })
                     } catch (e) {
                         clearJoinHangWatchdog()
                         log('❌ Reconnect failed: ' + (e && e.message ? e.message : e))
@@ -610,6 +666,41 @@
             log('🔀 Room name set to ' + roomNameEl.value + ' (join again)')
         }
 
+        function persistServerInputs() {
+            try {
+                localStorage.setItem(LS_PREFIX + 'baseUrl', jitsiBaseUrlEl.value || '')
+                localStorage.setItem(LS_PREFIX + 'configUrl', jitsiConfigUrlEl.value || '')
+                localStorage.setItem(LS_PREFIX + 'libUrl', jitsiLibUrlEl.value || '')
+                localStorage.setItem(LS_PREFIX + 'roomName', roomNameEl.value || '')
+            } catch (_) {}
+        }
+
+        function restoreServerInputs() {
+            try {
+                const base = localStorage.getItem(LS_PREFIX + 'baseUrl')
+                const cfg = localStorage.getItem(LS_PREFIX + 'configUrl')
+                const lib = localStorage.getItem(LS_PREFIX + 'libUrl')
+                const room = localStorage.getItem(LS_PREFIX + 'roomName')
+                if (base) jitsiBaseUrlEl.value = base
+                if (cfg) jitsiConfigUrlEl.value = cfg
+                if (lib) jitsiLibUrlEl.value = lib
+                if (room) roomNameEl.value = room
+            } catch (_) {}
+        }
+
+        function resetServerInputs() {
+            jitsiBaseUrlEl.value = DEFAULT_JITSI_BASE_URL
+            jitsiConfigUrlEl.value = ''
+            jitsiLibUrlEl.value = ''
+            persistServerInputs()
+            log('🔁 Server reset to ' + DEFAULT_JITSI_BASE_URL)
+        }
+
+        ;[jitsiBaseUrlEl, jitsiConfigUrlEl, jitsiLibUrlEl, roomNameEl].forEach((el) => {
+            el.addEventListener('change', persistServerInputs)
+            el.addEventListener('blur', persistServerInputs)
+        })
+        resetServerBtn.addEventListener('click', resetServerInputs)
         randomRoomBtn.addEventListener('click', fillRandomRoomName)
         joinBtn.addEventListener('click', joinRoom)
         leaveBtn.addEventListener('click', leaveRoom)
@@ -618,14 +709,15 @@
         
         // Initialize when page loads
         function initialize() {
+            restoreServerInputs()
+            const urls = getJitsiUrls()
             log('🚀 Jitsi Meet SDK integration example loaded (' + EXAMPLE_BUILD_ID + ')')
             log('🔧 PeerMetrics: ' + (peermetricsUseMock ? 'mockRequests (set PEERMETRICS_API_KEY to send stats)' : 'sending stats to API'))
-            if (typeof window.config !== 'undefined' && window.config && window.config.websocket) {
-                log('✅ meet.jit.si config.js is loaded (wss endpoint available)')
-            } else {
-                log('⚠️ window.config missing — allow meet.jit.si scripts or check network')
-            }
+            log('🌐 Jitsi server: ' + urls.base)
+            log('🧩 lib-jitsi-meet: ' + urls.libUrl)
+            log('🧩 config.js: ' + urls.configUrl)
             log('🎯 Full WebRTC monitoring: RTCPeerConnection objects will be captured automatically')
+            log('ℹ️ Click Join to load the Jitsi library/config from the server above.')
         }
         
         // Wait for page to load
