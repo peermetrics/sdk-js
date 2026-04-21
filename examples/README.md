@@ -14,15 +14,15 @@ From the repo root:
    npm run serve
    ```
 
-   This runs [http-server](https://www.npmjs.com/package/http-server) on port **8881** and opens `/examples` in your browser (`http://127.0.0.1:8881/examples/`).
+   This runs [http-server](https://www.npmjs.com/package/http-server) on port **3000** and opens `/examples` in your browser (`http://127.0.0.1:3000/examples/`).
 
 If you prefer another tool, serve the **project root** on any port, for example:
 
 ```bash
-npx http-server . -p 8881
+npx http-server . -p 3000
 ```
 
-Then open `http://localhost:8881/examples/`.
+Then open `http://localhost:3000/examples/`.
 
 Opening the HTML files directly (`file://`) is not recommended: `getUserMedia` and some WebRTC flows expect a secure context or `localhost`, and the scripts load `../dist/browser.js` relative to the repo layout.
 

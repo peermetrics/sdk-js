@@ -413,6 +413,7 @@ interface SdkIntegrationInterface {
   jitsi?: boolean | {
     serverId?: string
     serverName?: string
+    conference?: any
   }
 }
 ```

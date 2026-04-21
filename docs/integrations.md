@@ -323,7 +323,7 @@ peerMetrics.addSdkIntegration({
 
 ## 🎦 Jitsi Meet & Pion (wrap-based)
 
-Wrap `RTCPeerConnection` **before** lib-jitsi-meet or your Pion client creates any PC. Use `PeerMetricsOptions.wrapPeerConnection` + script order in HTML, or `PeerMetrics.wrapPeerConnection()` first in a bundler. Then `addSdkIntegration({ jitsi: true })` or `{ pion: true }` (or `{ serverId, serverName }`).
+Wrap `RTCPeerConnection` **before** lib-jitsi-meet or your Pion client creates any PC. Use `PeerMetricsOptions.wrapPeerConnection` + script order in HTML, or `PeerMetrics.wrapPeerConnection()` first in a bundler.
 
 ```typescript
 import { PeerMetrics } from '@peermetrics/sdk'
@@ -332,12 +332,26 @@ PeerMetrics.wrapPeerConnection()
 
 const peerMetrics = new PeerMetrics({ apiKey: '…', userId: '…', conferenceId: '…' })
 await peerMetrics.initialize()
-await peerMetrics.addSdkIntegration({ jitsi: true }) // or { pion: true }
+
+// Jitsi: call initJitsiConference first if you want participant lifecycle
+// events forwarded as custom events.
+const room = connection.initJitsiConference(roomName, conferenceConfig)
+await peerMetrics.addSdkIntegration({
+  jitsi: {
+    serverId: 'jitsi-sfu-server',
+    serverName: 'Jitsi SFU Server',
+    conference: room // optional
+  }
+})
+
+// Pion:
+// await peerMetrics.addSdkIntegration({ pion: true })
 
 // Then JitsiMeetJS… or e.g. ion-sdk-js Client / signal.
 ```
 
-Several PCs can share one **peerId**; **webrtc-stats** still assigns a unique **connectionId** per PC. Without a working wrap, integration throws (same idea as Vonage / Agora).
+Jitsi and Pion can emit multiple RTCPeerConnections; PeerMetrics tracks each one under the integration peer with a distinct `connectionId`.
+Without a working wrap, integration throws (same idea as Vonage / Agora).
 
 ## 🔗 SimplePeer Integration
 

@@ -446,10 +446,13 @@ const peerMetrics = new PeerMetrics({
 })
 await peerMetrics.initialize()
 
+const room = connection.initJitsiConference(roomName, conferenceConfig)
+
 await peerMetrics.addSdkIntegration({
     jitsi: {
         serverId: 'jitsi-sfu-server',
-        serverName: 'Jitsi SFU Server'
+        serverName: 'Jitsi SFU Server',
+        conference: room // optional, forwards USER_JOINED/USER_LEFT as custom events
     }
 })
 
@@ -457,7 +460,9 @@ await peerMetrics.addSdkIntegration({
 ```
 
 Notes:
-- Call `addSdkIntegration({ jitsi })` **before** `connection.connect()` so the wrapping is in place when Jitsi builds peer connections.
+- `wrapPeerConnection: true` (or `PeerMetrics.wrapPeerConnection()`) must be enabled before Jitsi creates peer connections.
+- If you pass `conference`, call `addSdkIntegration({ jitsi })` after `initJitsiConference(...)` so you can provide the live room instance.
+- Multiple Jitsi peer connections are supported under one `peerId` and are tracked with distinct `connectionId`s.
 
 See the runnable demo in [`examples/jitsi.html`](./examples/jitsi.html), which lets you point the integration at `meet.jit.si` or a self-hosted Jitsi server.
 
