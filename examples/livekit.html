@@ -52,6 +52,7 @@
             <button id="disconnectBtn" disabled>Disconnect</button>
             <button id="toggleVideoBtn" disabled>Toggle Video</button>
             <button id="toggleAudioBtn" disabled>Toggle Audio</button>
+            <button id="openSecondParticipantBtn">Open 2nd participant</button>
         </div>
         
         <div>
@@ -67,6 +68,7 @@
         let room = null
         let localVideo = null
         let remoteVideo = null
+        let resolvedConferenceId = ''
         
         // Initialize video elements immediately
         function initVideoElements() {
@@ -88,8 +90,48 @@
         const disconnectBtn = document.getElementById('disconnectBtn')
         const toggleVideoBtn = document.getElementById('toggleVideoBtn')
         const toggleAudioBtn = document.getElementById('toggleAudioBtn')
+        const openSecondParticipantBtn = document.getElementById('openSecondParticipantBtn')
         const livekitUrlEl = document.getElementById('livekitUrl')
         const livekitTokenEl = document.getElementById('livekitToken')
+        const startupQueryParams = new URLSearchParams(window.location.search)
+
+        function getParticipantIdentity() {
+            const slot = startupQueryParams.get('participant') === '2' ? '2' : '1'
+            const explicitUserId = String(startupQueryParams.get('userId') || '').trim()
+            const userId = explicitUserId || ('livekit-user-' + slot + '-' + Math.random().toString(36).substr(2, 6))
+            const userName = 'LiveKit User #' + slot
+            return { slot, userId, userName }
+        }
+
+        function decodeJwtPayload(token) {
+            try {
+                const parts = String(token || '').split('.')
+                if (parts.length < 2) return null
+                const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/')
+                const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4)
+                return JSON.parse(atob(padded))
+            } catch (_) {
+                return null
+            }
+        }
+
+        function toSafeConferenceSegment(raw) {
+            return String(raw || '').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 48)
+        }
+
+        function resolveConferenceIdFromTokenOrQuery(token) {
+            const payload = decodeJwtPayload(token)
+            const tokenRoom = payload && payload.video && typeof payload.video.room === 'string'
+                ? payload.video.room
+                : ''
+            const roomSegment = toSafeConferenceSegment(tokenRoom)
+            if (roomSegment) return 'livekit-room-' + roomSegment
+
+            const queryConferenceId = toSafeConferenceSegment(startupQueryParams.get('conferenceId'))
+            if (queryConferenceId) return 'livekit-room-' + queryConferenceId
+
+            return 'livekit-room-' + Math.random().toString(36).substr(2, 9)
+        }
         
         // Logging function
         function log(message) {
@@ -102,12 +144,15 @@
         // Initialize PeerMetrics
         async function initPeerMetrics() {
             try {
+                const identity = getParticipantIdentity()
+                const conferenceId = resolvedConferenceId || resolveConferenceIdFromTokenOrQuery(livekitTokenEl.value.trim())
+                resolvedConferenceId = conferenceId
                 peerMetrics = new PeerMetrics({
                     apiRoot: 'http://localhost:8081/v1',
                     apiKey: 'c4d00fa8c1d14c8d9c0dc72a0cab222e',
-                    userId: 'livekit-user-' + Math.random().toString(36).substr(2, 9),
-                    userName: 'LiveKit User',
-                    conferenceId: 'livekit-room-' + Math.random().toString(36).substr(2, 9),
+                    userId: identity.userId,
+                    userName: identity.userName,
+                    conferenceId: conferenceId,
                     conferenceName: 'LiveKit Demo Room',
                     appVersion: '1.0.0',
                     debug: true,
@@ -116,6 +161,7 @@
                 
                 await peerMetrics.initialize()
                 log('✅ PeerMetrics initialized successfully')
+                log('🧩 PeerMetrics conferenceId: ' + conferenceId)
                 
                 // Add LiveKit integration
                 await peerMetrics.addSdkIntegration({
@@ -127,6 +173,7 @@
                 })
                 
                 log('✅ LiveKit integration added')
+                log('🧭 LiveKit transport peers: outbound (publisher) and inbound (subscriber)')
                 log('📊 PeerMetrics will now monitor:')
                 log('   • WebRTC connection states and ICE candidates')
                 log('   • Audio/Video track statistics (bitrate, jitter, packet loss)')
@@ -230,9 +277,14 @@
                 if (!livekitToken || livekitToken === 'your-livekit-token') {
                     throw new Error('Please enter a valid LiveKit token')
                 }
+                resolvedConferenceId = resolveConferenceIdFromTokenOrQuery(livekitToken)
                 
                 log(`🔗 Connecting to: ${livekitUrl}`)
                 log(`🔑 Using token: ${livekitToken.substring(0, 20)}...`)
+
+                // Initialize PeerMetrics before room.connect so early transport/ICE lifecycle
+                // events are observed (otherwise initial state transitions can be missed).
+                await initPeerMetrics()
                 
                 // Connect to room with better error handling
                 try {
@@ -249,9 +301,6 @@
                 
                 // Video tracks will be handled by the LocalTrackPublished event
                 log('📹 Video tracks will be attached automatically when published')
-                
-                // Initialize PeerMetrics after room is connected
-                await initPeerMetrics()
                 
                 // Try to manually detect LiveKit connections as a fallback
                 setTimeout(async () => {
@@ -348,19 +397,38 @@
                 log('❌ Error toggling audio: ' + error.message)
             }
         }
+
+        function openSecondParticipantTab() {
+            const livekitUrl = livekitUrlEl.value.trim()
+            const url = new URL(window.location.href)
+            url.searchParams.set('participant', '2')
+            url.searchParams.set('userId', 'livekit-user-2-' + Date.now().toString(36))
+            if (resolvedConferenceId) {
+                url.searchParams.set('conferenceId', resolvedConferenceId.replace(/^livekit-room-/, ''))
+            }
+            if (livekitUrl) url.searchParams.set('livekitUrl', livekitUrl)
+            window.open(url.toString(), '_blank', 'noopener,noreferrer')
+            log('🪟 Opened second participant tab (URL prefilled, no auto-connect).')
+            log('ℹ️ LiveKit token is identity-bound: use a distinct token in tab 2 to avoid disconnecting tab 1.')
+        }
         
         // Event listeners
         connectBtn.addEventListener('click', connectToRoom)
         disconnectBtn.addEventListener('click', disconnectFromRoom)
         toggleVideoBtn.addEventListener('click', toggleVideo)
         toggleAudioBtn.addEventListener('click', toggleAudio)
+        openSecondParticipantBtn.addEventListener('click', openSecondParticipantTab)
         
         // Initialize when page is fully loaded
         function initialize() {
             // Initialize video elements first
             initVideoElements()
+            const identity = getParticipantIdentity()
+            const qpUrl = String(startupQueryParams.get('livekitUrl') || '').trim()
+            if (qpUrl) livekitUrlEl.value = qpUrl
             
             log('🚀 LiveKit integration example loaded')
+            log('🪪 Local participant: ' + identity.userName + ' (' + identity.userId + ')')
             
             // Check if LiveKit is loaded with retry mechanism
             let retryCount = 0
@@ -387,6 +455,13 @@
             }
             
             checkLiveKit()
+
+            if (startupQueryParams.get('autojoin') === '1') {
+                setTimeout(() => {
+                    void connectToRoom()
+                }, startupQueryParams.get('participant') === '2' ? 600 : 300)
+                log('🤖 Auto-connect requested by URL parameters.')
+            }
         }
         
         // Wait for page to load completely
