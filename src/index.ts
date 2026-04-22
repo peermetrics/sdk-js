@@ -8,7 +8,7 @@ import { DEFAULT_OPTIONS, CONSTRAINTS } from "./constants";
 import {ApiWrapper} from './api-wrapper'
 import SdkIntegration from "./sdk_integrations";
 
-import { enableDebug, log, wrapPeerConnection, PeerMetricsError} from './utils'
+import { enableDebug, log, wrapPeerConnection, PeerMetricsError, inferJitsiTransportKind} from './utils'
 
 import type {
   PeerMetricsConstructor,
@@ -62,8 +62,11 @@ export class PeerMetrics {
   private _initialized: boolean = false
   private webrtcSDK: WebrtcSDKs = ''
   private _sdkIntegration: InstanceType<typeof SdkIntegration> | null = null
-  private trackCreatePromises: Record<string, Promise<void>> = {}
-  private createdTrackIds: Record<string, boolean> = {}
+  // Scoped per connectionId so that the same trackId observed on different PCs
+  // (simulcast, renegotiation, replaceTrack) cannot collide, and so both maps
+  // drain when the connection is removed.
+  private trackCreatePromises: Record<string, Record<string, Promise<void>>> = {}
+  private createdTrackIds: Record<string, Set<string>> = {}
 
   /**
    * Used to initialize the SDK
@@ -423,35 +426,6 @@ export class PeerMetrics {
     }
   }
 
-  /**
-   * Search for Jitsi WebRTC connections
-   * @private
-   */
-  private _inferJitsiTransportKindForAutoDetect(pc: any): 'p2p' | 'jvb' | 'unknown' {
-    const directHints = [
-      pc?.isP2P,
-      pc?.p2p,
-      pc?.traceablePeerConnection?.isP2P,
-      pc?.tpc?.isP2P,
-      pc?.owner?._isP2P
-    ]
-    if (directHints.some(v => v === true)) return 'p2p'
-    if (directHints.some(v => v === false)) return 'jvb'
-
-    const textHints = [
-      pc?.id,
-      pc?.name,
-      pc?.label,
-      pc?.connectionId,
-      pc?._id,
-      pc?.__id
-    ].filter(Boolean).map((v: any) => String(v).toLowerCase())
-
-    if (textHints.some((v: string) => v.includes('p2p'))) return 'p2p'
-    if (textHints.some((v: string) => v.includes('jvb') || v.includes('bridge') || v.includes('sfu'))) return 'jvb'
-    return 'unknown'
-  }
-
   private _searchJitsiConnections(
     rtc: any,
     pushConnection: (pc: RTCPeerConnection, peerId: string, source: string) => void
@@ -479,7 +453,7 @@ export class PeerMetrics {
         if (current instanceof Map) {
           for (const [, pc] of current) {
             if (pc instanceof RTCPeerConnection) {
-              const kind = this._inferJitsiTransportKindForAutoDetect(pc)
+              const kind = inferJitsiTransportKind(pc)
               const peerId = kind === 'p2p'
                 ? 'jitsi-sfu-server-p2p'
                 : kind === 'jvb'
@@ -491,7 +465,7 @@ export class PeerMetrics {
         } else if (Array.isArray(current)) {
           current.forEach((pc) => {
             if (pc instanceof RTCPeerConnection) {
-              const kind = this._inferJitsiTransportKindForAutoDetect(pc)
+              const kind = inferJitsiTransportKind(pc)
               const peerId = kind === 'p2p'
                 ? 'jitsi-sfu-server-p2p'
                 : kind === 'jvb'
@@ -501,7 +475,7 @@ export class PeerMetrics {
             }
           })
         } else if (current instanceof RTCPeerConnection) {
-          const kind = this._inferJitsiTransportKindForAutoDetect(current)
+          const kind = inferJitsiTransportKind(current)
           const peerId = kind === 'p2p'
             ? 'jitsi-sfu-server-p2p'
             : kind === 'jvb'
@@ -662,6 +636,8 @@ export class PeerMetrics {
 
     // cleanup
     delete monitoredConnections[connectionId]
+    delete this.trackCreatePromises[internalId]
+    delete this.createdTrackIds[internalId]
     peer.connections = peer.connections.filter(cId => cId !== internalId)
   }
 
@@ -981,6 +957,12 @@ export class PeerMetrics {
         this._handleTimelineEvent(event)
       }
     }
+
+    if (drainRounds >= maxDrainRounds && eventQueue.length > 0) {
+      log(
+        `drain loop hit max rounds (${maxDrainRounds}); ${eventQueue.length} event(s) still queued — possible dropped events`
+      )
+    }
   }
 
   private _handleTimelineEvent (ev) {
@@ -1121,26 +1103,35 @@ export class PeerMetrics {
       return
     }
 
+    const connectionPromises = this.trackCreatePromises[connectionId] || (this.trackCreatePromises[connectionId] = {})
+    const connectionCreated = this.createdTrackIds[connectionId] || (this.createdTrackIds[connectionId] = new Set<string>())
+
     if (event === 'ontrack') {
       const createPromise = this.apiWrapper.sendTrackEvent(dataToSend)
         .then(() => {
-          this.createdTrackIds[trackId] = true
+          // The connection may have been removed while the create request was in flight;
+          // only flip the flag if we still own the scoped map.
+          if (this.createdTrackIds[connectionId] === connectionCreated) {
+            connectionCreated.add(trackId)
+          }
         })
         .catch((e) => {
           log('Could not create track:', e && e.message ? e.message : e)
         })
         .finally(() => {
-          delete this.trackCreatePromises[trackId]
+          if (this.trackCreatePromises[connectionId] === connectionPromises) {
+            delete connectionPromises[trackId]
+          }
         })
-      this.trackCreatePromises[trackId] = createPromise
+      connectionPromises[trackId] = createPromise
       return
     }
 
-    const maybePendingCreate = this.trackCreatePromises[trackId]
+    const maybePendingCreate = connectionPromises[trackId]
     if (maybePendingCreate) {
       maybePendingCreate
         .then(() => {
-          if (!this.createdTrackIds[trackId]) return
+          if (!connectionCreated.has(trackId)) return
           return this.apiWrapper.sendTrackEvent(dataToSend)
         })
         .catch((e) => {
@@ -1149,7 +1140,7 @@ export class PeerMetrics {
       return
     }
 
-    if (!this.createdTrackIds[trackId]) {
+    if (!connectionCreated.has(trackId)) {
       return
     }
 

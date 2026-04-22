@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events'
 
 import { CONSTRAINTS } from "./constants";
+import { inferJitsiTransportKind, log } from './utils'
 
 import type {
     SdkIntegrationInterface,
@@ -236,24 +237,27 @@ export default class SdkIntegration extends EventEmitter {
             })
             
         } catch (error) {
-            // Silently handle errors - connections will be caught by event listeners
+            // Non-fatal: connections will be caught by event listeners. Surface the error
+            // for diagnostics instead of silently swallowing it.
+            log('LiveKit connection scan failed:', error)
         }
     }
 
-    _deepSearchForConnections(obj, connections, visited = new Set()) {
-        if (!obj || typeof obj !== 'object' || visited.has(obj)) return
-        
+    _deepSearchForConnections(obj, connections, visited = new Set(), depth = 8) {
+        if (!obj || typeof obj !== 'object' || visited.has(obj) || depth < 0) return
+
         visited.add(obj)
-        
+
         if (obj.constructor?.name === 'RTCPeerConnection') {
             connections.push(obj)
             return
         }
-        
-        // Recursively search object properties
+
+        // Recursively search object properties with a bounded depth to avoid walking
+        // deep/circular object graphs (SDK internals often expose large meshes).
         Object.values(obj).forEach(value => {
             if (value && typeof value === 'object') {
-                this._deepSearchForConnections(value, connections, visited)
+                this._deepSearchForConnections(value, connections, visited, depth - 1)
             }
         })
     }
@@ -425,31 +429,6 @@ export default class SdkIntegration extends EventEmitter {
         return this._buildScopedPeerId(baseId, suffix)
     }
 
-    private _inferJitsiTransportKind(pc: any): 'p2p' | 'jvb' | 'unknown' {
-        const candidates = [
-            pc?.isP2P,
-            pc?.p2p,
-            pc?.traceablePeerConnection?.isP2P,
-            pc?.tpc?.isP2P,
-            pc?.owner?._isP2P
-        ]
-        if (candidates.some(v => v === true)) return 'p2p'
-        if (candidates.some(v => v === false)) return 'jvb'
-
-        const textHints = [
-            pc?.id,
-            pc?.name,
-            pc?.label,
-            pc?.connectionId,
-            pc?._id,
-            pc?.__id
-        ].filter(Boolean).map((v: any) => String(v).toLowerCase())
-
-        if (textHints.some((v: string) => v.includes('p2p'))) return 'p2p'
-        if (textHints.some((v: string) => v.includes('jvb') || v.includes('bridge') || v.includes('sfu'))) return 'jvb'
-        return 'unknown'
-    }
-
     private _inferJitsiTransportKindFromTrack(track: any): 'p2p' | 'jvb' | 'unknown' {
         if (!track) return 'unknown'
         const candidate = typeof track.isP2P === 'function' ? track.isP2P() : track.isP2P
@@ -462,7 +441,7 @@ export default class SdkIntegration extends EventEmitter {
         if (this._emittedPCs.has(pc)) return
         this._emittedPCs.add(pc)
 
-        const kind = this._inferJitsiTransportKind(pc)
+        const kind = inferJitsiTransportKind(pc)
         let scopedPeerId = peerId
         let scopedPeerName = peerName
         if (kind === 'p2p') {
@@ -579,20 +558,23 @@ export default class SdkIntegration extends EventEmitter {
             this._jitsiTrackParticipantHints = new WeakMap()
         }
 
-        const runPcDiscovery = () => {
+        const runPcDiscovery = (): boolean => {
             try {
-                this._discoverJitsiPeerConnectionsUnderConference(conference)
+                return this._discoverJitsiPeerConnectionsUnderConference(conference)
             } catch {
                 // best-effort: discovery is optional across Jitsi versions
+                return false
             }
         }
 
         if (events.CONFERENCE_JOINED) {
             safeOn(events.CONFERENCE_JOINED, () => {
-                runPcDiscovery()
-                if (typeof window !== 'undefined' && typeof window.setTimeout === 'function') {
-                    window.setTimeout(runPcDiscovery, 400)
-                    window.setTimeout(runPcDiscovery, 2000)
+                // Retry only if the first pass did not find any PC: lib-jitsi-meet may build
+                // the PC slightly after CONFERENCE_JOINED on slow devices. Avoids the prior
+                // 3×12k-node traversal cost on successful first passes.
+                const foundImmediate = runPcDiscovery()
+                if (!foundImmediate && typeof window !== 'undefined' && typeof window.setTimeout === 'function') {
+                    window.setTimeout(runPcDiscovery, 800)
                 }
             })
         }
@@ -603,16 +585,24 @@ export default class SdkIntegration extends EventEmitter {
 
     /**
      * Walk the conference object graph to find RTCPeerConnection instances lib-jitsi-meet
-     * may have created before our wrap listener was registered (or that never go through window.RTCPeerConnection).
+     * may have created before our wrap listener was registered (or that never go through
+     * `window.RTCPeerConnection`).
+     *
+     * Bounded on both depth and node count to keep worst-case cost low on dense Jitsi
+     * object graphs — `lib-jitsi-meet` objects expose many getters that can be expensive
+     * to invoke. Returns whether at least one PC was emitted so callers can skip scheduled
+     * retries on success.
      */
-    private _discoverJitsiPeerConnectionsUnderConference(root: any): void {
+    private _discoverJitsiPeerConnectionsUnderConference(root: any): boolean {
         const peerId = this._jitsiTransportPeerId
         const peerName = this._jitsiTransportPeerName
-        if (!peerId || !root || typeof root !== 'object') return
+        if (!peerId || !root || typeof root !== 'object') return false
 
         const visited = new WeakSet<object>()
         let nodes = 0
-        const MAX_NODES = 12000
+        let emitted = 0
+        const MAX_NODES = 6000
+        const MAX_DEPTH = 8
 
         const walk = (obj: any, depth: number): void => {
             if (obj == null || depth < 0 || nodes > MAX_NODES) return
@@ -623,7 +613,9 @@ export default class SdkIntegration extends EventEmitter {
 
             try {
                 if (typeof RTCPeerConnection !== 'undefined' && obj instanceof RTCPeerConnection) {
+                    const before = this._emittedPCs.has(obj)
                     this._addJitsiConnection(obj, peerId, peerName)
+                    if (!before) emitted++
                     return
                 }
             } catch {
@@ -658,7 +650,8 @@ export default class SdkIntegration extends EventEmitter {
             }
         }
 
-        walk(root, 12)
+        walk(root, MAX_DEPTH)
+        return emitted > 0
     }
 
     private _extractParticipantIdFromTrack(track: any): string | null {
@@ -687,7 +680,9 @@ export default class SdkIntegration extends EventEmitter {
                 this._searchExistingJitsiConnectionsInternal(window.JitsiMeetJS.app._room.rtc, peerId, peerName)
             }
         } catch (error) {
-            // Jitsi not ready yet, connections will be captured via event emitter
+            // Jitsi not ready yet, connections will be captured via event emitter.
+            // Still log the underlying cause to aid debugging unexpected failures.
+            log('Jitsi connection scan failed:', error)
         }
     }
 

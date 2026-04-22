@@ -370,17 +370,47 @@
                 log('❌ Failed to connect to LiveKit: ' + error.message)
                 statusEl.textContent = 'Status: Connection failed'
                 connectBtn.disabled = false
+                if (room) {
+                    try {
+                        await room.disconnect()
+                    } catch (_) { /* ignore */ }
+                    room = null
+                }
+                if (peerMetrics) {
+                    try {
+                        await peerMetrics.endCall()
+                        log('📴 PeerMetrics endCall after failed connect')
+                    } catch (_) { /* ignore */ }
+                    peerMetrics = null
+                }
             }
         }
         
         // Disconnect from room
         async function disconnectFromRoom() {
+            if (!room) {
+                log('⚠️ No active room to disconnect')
+                return
+            }
             try {
                 log('🔄 Disconnecting from LiveKit room...')
                 await room.disconnect()
                 log('✅ Disconnected from LiveKit room')
             } catch (error) {
                 log('❌ Error disconnecting: ' + error.message)
+            } finally {
+                room = null
+                // LiveKit teardown alone does not stop PeerMetrics / webrtc-stats or tell the
+                // backend the session ended — same pattern as basic-webrtc Hang Up.
+                if (peerMetrics) {
+                    try {
+                        await peerMetrics.endCall()
+                        log('📴 PeerMetrics endCall: WebRTC stats stopped and session closed with backend')
+                    } catch (e) {
+                        log('⚠️ PeerMetrics endCall failed: ' + (e && e.message ? e.message : e))
+                    }
+                    peerMetrics = null
+                }
             }
         }
         
@@ -498,7 +528,7 @@
                 } else {
                     log('✅ LiveKit library loaded successfully')
                     log('📝 Note: Enter your LiveKit URL and token in the form above to test with real LiveKit server')
-                    log('🔧 This example uses mockRequests: true for testing')
+                    log('🔧 This example uses mockRequests: false (real API) unless you change initPeerMetrics')
                     connectBtn.disabled = false
                 }
             }

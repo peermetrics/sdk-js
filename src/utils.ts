@@ -53,3 +53,37 @@ export function wrapPeerConnection(global: any, existingEmitter?: EventEmitter |
 
   return peerConnectionEventEmitter
 }
+
+/**
+ * Classify a Jitsi-originated RTCPeerConnection as peer-to-peer or JVB-bridged.
+ *
+ * Jitsi exposes transport kind inconsistently across lib-jitsi-meet versions
+ * (boolean flags on the PC, on wrapping traceable/tpc objects, on owners, or
+ * only encoded in id/label strings). We probe each known location in priority
+ * order and fall back to text hints so both the autoDetect code path and the
+ * sdk_integrations wrap path label connections identically.
+ */
+export function inferJitsiTransportKind(pc: any): 'p2p' | 'jvb' | 'unknown' {
+  const directHints = [
+    pc?.isP2P,
+    pc?.p2p,
+    pc?.traceablePeerConnection?.isP2P,
+    pc?.tpc?.isP2P,
+    pc?.owner?._isP2P
+  ]
+  if (directHints.some(v => v === true)) return 'p2p'
+  if (directHints.some(v => v === false)) return 'jvb'
+
+  const textHints = [
+    pc?.id,
+    pc?.name,
+    pc?.label,
+    pc?.connectionId,
+    pc?._id,
+    pc?.__id
+  ].filter(Boolean).map((v: any) => String(v).toLowerCase())
+
+  if (textHints.some((v: string) => v.includes('p2p'))) return 'p2p'
+  if (textHints.some((v: string) => v.includes('jvb') || v.includes('bridge') || v.includes('sfu'))) return 'jvb'
+  return 'unknown'
+}
