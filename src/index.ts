@@ -427,6 +427,31 @@ export class PeerMetrics {
    * Search for Jitsi WebRTC connections
    * @private
    */
+  private _inferJitsiTransportKindForAutoDetect(pc: any): 'p2p' | 'jvb' | 'unknown' {
+    const directHints = [
+      pc?.isP2P,
+      pc?.p2p,
+      pc?.traceablePeerConnection?.isP2P,
+      pc?.tpc?.isP2P,
+      pc?.owner?._isP2P
+    ]
+    if (directHints.some(v => v === true)) return 'p2p'
+    if (directHints.some(v => v === false)) return 'jvb'
+
+    const textHints = [
+      pc?.id,
+      pc?.name,
+      pc?.label,
+      pc?.connectionId,
+      pc?._id,
+      pc?.__id
+    ].filter(Boolean).map((v: any) => String(v).toLowerCase())
+
+    if (textHints.some((v: string) => v.includes('p2p'))) return 'p2p'
+    if (textHints.some((v: string) => v.includes('jvb') || v.includes('bridge') || v.includes('sfu'))) return 'jvb'
+    return 'unknown'
+  }
+
   private _searchJitsiConnections(
     rtc: any,
     pushConnection: (pc: RTCPeerConnection, peerId: string, source: string) => void
@@ -452,19 +477,37 @@ export class PeerMetrics {
 
       if (current && typeof current === 'object') {
         if (current instanceof Map) {
-          for (const [peerId, pc] of current) {
+          for (const [, pc] of current) {
             if (pc instanceof RTCPeerConnection) {
-              pushConnection(pc, `jitsi-${peerId}`, 'jitsi-pattern')
+              const kind = this._inferJitsiTransportKindForAutoDetect(pc)
+              const peerId = kind === 'p2p'
+                ? 'jitsi-sfu-server-p2p'
+                : kind === 'jvb'
+                  ? 'jitsi-sfu-server-jvb'
+                  : 'jitsi-sfu-server'
+              pushConnection(pc, peerId, 'jitsi-pattern')
             }
           }
         } else if (Array.isArray(current)) {
-          current.forEach((pc, index) => {
+          current.forEach((pc) => {
             if (pc instanceof RTCPeerConnection) {
-              pushConnection(pc, `jitsi-${index}`, 'jitsi-pattern')
+              const kind = this._inferJitsiTransportKindForAutoDetect(pc)
+              const peerId = kind === 'p2p'
+                ? 'jitsi-sfu-server-p2p'
+                : kind === 'jvb'
+                  ? 'jitsi-sfu-server-jvb'
+                  : 'jitsi-sfu-server'
+              pushConnection(pc, peerId, 'jitsi-pattern')
             }
           })
         } else if (current instanceof RTCPeerConnection) {
-          pushConnection(current, 'jitsi-main', 'jitsi-pattern')
+          const kind = this._inferJitsiTransportKindForAutoDetect(current)
+          const peerId = kind === 'p2p'
+            ? 'jitsi-sfu-server-p2p'
+            : kind === 'jvb'
+              ? 'jitsi-sfu-server-jvb'
+              : 'jitsi-sfu-server'
+          pushConnection(current, peerId, 'jitsi-pattern')
         }
       }
     }

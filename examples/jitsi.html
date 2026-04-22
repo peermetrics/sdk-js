@@ -61,6 +61,10 @@
                 <option value="own">A) Own setup (self-hosted/custom)</option>
                 <option value="jaas">B) JaaS (8x8.vc + App ID + JWT)</option>
             </select>
+            <label for="forceP2P" style="display: inline-flex; align-items: center; gap: 8px; margin-top: 8px; cursor: pointer;">
+                <input type="checkbox" id="forceP2P">
+                Force P2P (1:1 preference; not used for group calls)
+            </label>
             <div id="deploymentModeHint" class="mode-hint"></div>
             <div id="metricsCapability" class="metrics-capability"></div>
             <label for="jitsiBaseUrl">Jitsi base URL (server root that serves <code>/config.js</code> and <code>/libs/lib-jitsi-meet.min.js</code>)</label>
@@ -158,6 +162,7 @@
         const jitsiJwtTokenEl = document.getElementById('jitsiJwtToken')
         const jitsiAppIdEl = document.getElementById('jitsiAppId')
         const deploymentModeEl = document.getElementById('deploymentMode')
+        const forceP2PEl = document.getElementById('forceP2P')
         const deploymentModeHintEl = document.getElementById('deploymentModeHint')
         const metricsCapabilityEl = document.getElementById('metricsCapability')
         const resetServerBtn = document.getElementById('resetServerBtn')
@@ -268,6 +273,10 @@
             if (c.testing && typeof c.testing === 'object') {
                 c.testing = Object.assign({}, c.testing)
                 delete c.testing.enableGracefulReconnect
+            }
+            if (forceP2PEl && forceP2PEl.checked) {
+                const p2pConfig = (c.p2p && typeof c.p2p === 'object') ? c.p2p : {}
+                c.p2p = Object.assign({}, p2pConfig, { enabled: true })
             }
             return c
         }
@@ -501,6 +510,9 @@
             if (websocketKeepAliveUrl) log('📡 websocketKeepAliveUrl: ' + websocketKeepAliveUrl)
             log(jwtToken ? '🔐 Auth mode: JWT token configured' : '🔓 Auth mode: anonymous')
             log('🧭 Deployment mode: ' + (mode === 'jaas' ? 'JaaS' : 'Own setup'))
+            if (forceP2PEl && forceP2PEl.checked) {
+                log('🔒 Force P2P is enabled (applies to 1:1 calls; group calls can still use JVB/SFU).')
+            }
             if (appId) {
                 log('🆔 App ID: ' + appId)
                 log('🏷️ Effective room: ' + fullRoomName)
@@ -821,6 +833,18 @@
                 log('👤 User left: ' + displayName + ' (id=' + id + ')')
             })
 
+            if (JitsiMeetJS.events.conference.P2P_STATUS) {
+                room.addEventListener(JitsiMeetJS.events.conference.P2P_STATUS, (active) => {
+                    const modeLabel = active ? 'P2P' : 'JVB/SFU'
+                    log('🔎 Actual Jitsi media mode: ' + modeLabel + ' (from conference.P2P_STATUS)')
+                    if (!active && forceP2PEl && forceP2PEl.checked) {
+                        log('ℹ️ Force P2P is a preference only; this deployment/session is currently on JVB/SFU.')
+                    }
+                })
+            } else {
+                log('ℹ️ P2P_STATUS event not available in this lib-jitsi-meet build.')
+            }
+
             connection.connect({ name: roomForTransport })
         }
 
@@ -992,6 +1016,7 @@
                 localStorage.setItem(LS_PREFIX + 'jwtToken', jitsiJwtTokenEl.value || '')
                 localStorage.setItem(LS_PREFIX + 'appId', jitsiAppIdEl.value || '')
                 localStorage.setItem(LS_PREFIX + 'deploymentMode', deploymentModeEl.value || 'own')
+                localStorage.setItem(LS_PREFIX + 'forceP2P', forceP2PEl && forceP2PEl.checked ? '1' : '0')
                 localStorage.setItem(LS_PREFIX + 'roomName', roomNameEl.value || '')
             } catch (_) {}
         }
@@ -1004,6 +1029,7 @@
                 const jwt = localStorage.getItem(LS_PREFIX + 'jwtToken')
                 const appId = localStorage.getItem(LS_PREFIX + 'appId')
                 const mode = localStorage.getItem(LS_PREFIX + 'deploymentMode')
+                const forceP2P = localStorage.getItem(LS_PREFIX + 'forceP2P')
                 const room = localStorage.getItem(LS_PREFIX + 'roomName')
                 if (base) jitsiBaseUrlEl.value = base
                 if (cfg) jitsiConfigUrlEl.value = cfg
@@ -1011,6 +1037,7 @@
                 if (jwt) jitsiJwtTokenEl.value = jwt
                 if (appId) jitsiAppIdEl.value = appId
                 deploymentModeEl.value = mode || detectDeploymentModeFromInputs()
+                if (forceP2PEl) forceP2PEl.checked = forceP2P === '1'
                 if (room) roomNameEl.value = room
                 applyDeploymentModeDefaults(deploymentModeEl.value, { preserveBase: true })
             } catch (_) {}
@@ -1023,6 +1050,7 @@
             jitsiLibUrlEl.value = ''
             jitsiJwtTokenEl.value = ''
             jitsiAppIdEl.value = ''
+            if (forceP2PEl) forceP2PEl.checked = false
             applyDeploymentModeDefaults('own', { preserveBase: true })
             persistServerInputs()
             log('🔁 Server reset to ' + DEFAULT_JITSI_BASE_URL)
@@ -1062,6 +1090,12 @@
             el.addEventListener('change', persistServerInputs)
             el.addEventListener('blur', persistServerInputs)
         })
+        if (forceP2PEl) {
+            forceP2PEl.addEventListener('change', () => {
+                persistServerInputs()
+                log('🧭 Force P2P: ' + (forceP2PEl.checked ? 'enabled' : 'disabled'))
+            })
+        }
         resetServerBtn.addEventListener('click', resetServerInputs)
         randomRoomBtn.addEventListener('click', fillRandomRoomName)
         joinBtn.addEventListener('click', joinRoom)
