@@ -462,7 +462,7 @@ await peerMetrics.addSdkIntegration({
 Notes:
 - `wrapPeerConnection: true` (or `PeerMetrics.wrapPeerConnection()`) must be enabled before Jitsi creates peer connections.
 - If you pass `conference`, call `addSdkIntegration({ jitsi })` after `initJitsiConference(...)` so you can provide the live room instance.
-- Multiple Jitsi peer connections are supported under one `peerId` and are tracked with distinct `connectionId`s.
+- Multiple Jitsi peer connections are supported and tracked with distinct `connectionId`s; peer mapping may be transport-scoped (`P2P` / `JVB`) when inferable.
 - `conference` adds participant lifecycle custom events (`jitsiUserJoined`, `jitsiUserLeft`, `jitsiDisplayNameChanged`, track add/remove hints); transport stats still come from monitored RTCPeerConnections.
 
 Known backend assumption:
