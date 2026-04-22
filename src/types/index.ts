@@ -73,6 +73,17 @@ export interface JitsiIntegrationInterface {
     conference?: any
 }
 
+export interface JitsiParticipantEvent {
+    eventName: string
+    participantId?: string
+    displayName?: string
+    trackType?: string
+    trackId?: string
+    reason?: string
+    participantsTracked?: number
+    [key: string]: any
+}
+
 export interface SdkIntegrationInterface {
     mediasoup?: MediaSoupIntegration,
     janus?: JanusIntegrationInterface,

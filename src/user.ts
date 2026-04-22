@@ -1,5 +1,5 @@
 
-import UAParse from 'ua-parser-js'
+import { UAParser } from 'ua-parser-js'
 
 interface ConstructorOptions {
   userId: string,
@@ -54,7 +54,7 @@ export class User {
   }
 
   getUAdetails () {
-    return new UAParse().getResult()
+    return new UAParser().getResult()
   }
 
   getContraints () {

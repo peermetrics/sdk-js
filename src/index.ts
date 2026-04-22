@@ -22,7 +22,8 @@ import type {
   SessionData,
   PageEvents,
   AddEventOptions,
-  PeersToMonitor
+  PeersToMonitor,
+  JitsiParticipantEvent
 } from './types/index'
 
 export {PeerMetricsConstructor, AddConnectionOptions, AddEventOptions, AutoDetectConnectionsOptions}
@@ -60,6 +61,9 @@ export class PeerMetrics {
   private _options: PeerMetricsConstructor
   private _initialized: boolean = false
   private webrtcSDK: WebrtcSDKs = ''
+  private _sdkIntegration: InstanceType<typeof SdkIntegration> | null = null
+  private trackCreatePromises: Record<string, Promise<void>> = {}
+  private createdTrackIds: Record<string, boolean> = {}
 
   /**
    * Used to initialize the SDK
@@ -252,7 +256,7 @@ export class PeerMetrics {
 
     this.addMediaDeviceChangeListener()
 
-    this._initializeStatsModule(response.getStatsInterval)
+    this._initializeStatsModule(this._options.getStatsInterval || response.getStatsInterval)
   }
 
   /**
@@ -264,7 +268,7 @@ export class PeerMetrics {
       throw new Error('Could not find gloal window. This method should be called in a browser context.')
     }
 
-    peerConnectionEventEmitter = wrapPeerConnection(window)
+    peerConnectionEventEmitter = wrapPeerConnection(window) as EventEmitter | null
     if (!peerConnectionEventEmitter) {
       log('Could not wrap window.RTCPeerConnection')
       return false
@@ -648,6 +652,7 @@ export class PeerMetrics {
   public async addSdkIntegration(options: SdkIntegrationInterface) {
 
     let sdkIntegration = new SdkIntegration()
+    this._sdkIntegration = sdkIntegration
 
     sdkIntegration.on('newConnection', (opts) => {
       this.addConnection(opts).catch((e) => log(e))
@@ -656,15 +661,33 @@ export class PeerMetrics {
     // Jitsi conference-level participant events (opt-in via
     // `addSdkIntegration({ jitsi: { conference } })`) are forwarded as
     // regular custom events so the dashboard can render them.
-    sdkIntegration.on('jitsiParticipantEvent', (ev) => {
-      this.addEvent(ev).catch((e) => log(e))
+    sdkIntegration.on('jitsiParticipantEvent', (ev: JitsiParticipantEvent) => {
+      if (!ev || typeof ev !== 'object') {
+        log('Ignoring malformed jitsiParticipantEvent payload.')
+        return
+      }
+
+      // Keep participant events bounded before handing them to addEvent(),
+      // which enforces final serialization limits.
+      const payload: JitsiParticipantEvent = {
+        ...ev,
+        eventName: typeof ev.eventName === 'string' && ev.eventName ? ev.eventName : 'jitsiParticipantEvent'
+      }
+
+      this.addEvent(payload as AddEventOptions).catch((e) => log(e))
     })
 
     // if we have a pion or jitsi integration, it's safe to wrap the peer connection later
     if (options.pion || options.jitsi) {
-      // if we haven't already wrapped
       if (!peerConnectionEventEmitter) {
-        peerConnectionEventEmitter = wrapPeerConnection(window)
+        peerConnectionEventEmitter = wrapPeerConnection(window) as EventEmitter
+      } else if (options.jitsi) {
+        // lib-jitsi-meet often replaces window.RTCPeerConnection when its bundle loads; chain
+        // our instrumentation outside whatever is currently on `window`.
+        const chained = wrapPeerConnection(window, peerConnectionEventEmitter as EventEmitter)
+        if (chained) {
+          peerConnectionEventEmitter = chained as EventEmitter
+        }
       }
     }
 
@@ -684,6 +707,17 @@ export class PeerMetrics {
     } else {
       throw new Error("We could not find any integration details in the options object that was passed in.")
     }
+  }
+
+  /**
+   * After `addSdkIntegration({ jitsi: { serverId, serverName } })`, attach the live
+   * `JitsiConference` for participant lifecycle events and late PC discovery.
+   */
+  public attachJitsiConference(conference: any): void {
+    if (!this._sdkIntegration) {
+      throw new Error('Call addSdkIntegration with jitsi options before attachJitsiConference().')
+    }
+    this._sdkIntegration.attachJitsiConference(conference)
   }
 
   /**
@@ -1006,6 +1040,12 @@ export class PeerMetrics {
 
   private _handleTrackEvent (ev) {
     let {data, peerId, connectionId, event} = ev
+    // getUserMedia-attached tracks emit mute/unmute/ended without peerId/connectionId.
+    // Those are PUT /tracks updates; the API only has tracks created via ontrack POST for a
+    // monitored connection — sending PUTs here causes track_not_found.
+    if (event !== 'ontrack' && (!peerId || !connectionId)) {
+      return
+    }
     let dataToSend = {
       event,
       peerId,
@@ -1031,6 +1071,43 @@ export class PeerMetrics {
       }
     } else {
       log('Received track event without track')
+    }
+
+    const trackId = dataToSend.trackId
+    if (!trackId) {
+      return
+    }
+
+    if (event === 'ontrack') {
+      const createPromise = this.apiWrapper.sendTrackEvent(dataToSend)
+        .then(() => {
+          this.createdTrackIds[trackId] = true
+        })
+        .catch((e) => {
+          log('Could not create track:', e && e.message ? e.message : e)
+        })
+        .finally(() => {
+          delete this.trackCreatePromises[trackId]
+        })
+      this.trackCreatePromises[trackId] = createPromise
+      return
+    }
+
+    const maybePendingCreate = this.trackCreatePromises[trackId]
+    if (maybePendingCreate) {
+      maybePendingCreate
+        .then(() => {
+          if (!this.createdTrackIds[trackId]) return
+          return this.apiWrapper.sendTrackEvent(dataToSend)
+        })
+        .catch((e) => {
+          log('Could not send track update:', e && e.message ? e.message : e)
+        })
+      return
+    }
+
+    if (!this.createdTrackIds[trackId]) {
+      return
     }
 
     this.apiWrapper.sendTrackEvent(dataToSend)

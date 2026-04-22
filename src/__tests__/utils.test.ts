@@ -72,4 +72,42 @@ describe('utils.wrapPeerConnection', () => {
     expect(emitted).toHaveLength(1)
     expect(emitted[0]).toBe(instances[0])
   })
+
+  it('does not stack a second wrapper when the global is still ours', () => {
+    class FakeRTCPeerConnection {
+      constructor () {}
+    }
+    const fakeGlobal: any = { RTCPeerConnection: FakeRTCPeerConnection }
+    const emitter = wrapPeerConnection(fakeGlobal) as any
+    const again = wrapPeerConnection(fakeGlobal, emitter)
+    expect(again).toBe(emitter)
+
+    const emitted: any[] = []
+    emitter.on('newRTCPeerconnection', (pc: any) => emitted.push(pc))
+    const created = new fakeGlobal.RTCPeerConnection()
+    expect(emitted).toHaveLength(1)
+    expect(emitted[0]).toBe(created)
+  })
+
+  it('re-chains when RTCPeerConnection was replaced after the first wrap (lib-jitsi shim)', () => {
+    class ShimRTCPeerConnection {
+      constructor (public cfg?: any) {}
+    }
+    const fakeGlobal: any = { RTCPeerConnection: ShimRTCPeerConnection }
+    const emitter = wrapPeerConnection(fakeGlobal) as any
+
+    class LibJitsiRTCPeerConnection {
+      constructor (public cfg?: any) {}
+    }
+    fakeGlobal.RTCPeerConnection = LibJitsiRTCPeerConnection
+
+    wrapPeerConnection(fakeGlobal, emitter)
+
+    const emitted: any[] = []
+    emitter.on('newRTCPeerconnection', (pc: any) => emitted.push(pc))
+    const created = new fakeGlobal.RTCPeerConnection({ iceServers: [] })
+    expect(created).toBeInstanceOf(LibJitsiRTCPeerConnection)
+    expect(emitted).toHaveLength(1)
+    expect(emitted[0]).toBe(created)
+  })
 })

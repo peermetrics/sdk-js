@@ -1,7 +1,9 @@
 import { EventEmitter } from 'events'
 
 let debug = false
-let realPeerConnection = null
+
+/** Set on our outer RTCPeerConnection replacement so we can avoid double-wrapping. */
+const PEERMETRICS_PC_WRAP = '__peerMetricsWrapped'
 
 export function enableDebug (newValue) {
   debug = newValue
@@ -15,30 +17,39 @@ export class PeerMetricsError extends Error {
   code: number
 }
 
-export function wrapPeerConnection(global) {
-  if (global.RTCPeerConnection) {
-    realPeerConnection = global.RTCPeerConnection
-    let peerConnectionEventEmitter = new EventEmitter()
-
-    // this is the ideal way but it causes problems with AdBlocker's wrapper
-    // class RTCPeerConnection extends global.RTCPeerConnection {
-    //   constructor(parameters) {
-    //     super(parameters)
-    //     peerConnectionEventEmitter.emit('newRTCPeerconnection', this)
-    //   }
-    // }
-    // global.RTCPeerConnection = RTCPeerConnection
-
-    let WrappedRTCPeerConnection = function (configuration, constraints) {
-      let peerconnection = new realPeerConnection(configuration, constraints)
-      peerConnectionEventEmitter.emit('newRTCPeerconnection', peerconnection)
-      return peerconnection
-    }
-    WrappedRTCPeerConnection.prototype = realPeerConnection.prototype
-    global.RTCPeerConnection = WrappedRTCPeerConnection
-
-    return peerConnectionEventEmitter
+/**
+ * Wraps `global.RTCPeerConnection` so `new RTCPeerConnection(...)` emits `newRTCPeerconnection`
+ * on the returned EventEmitter with the **underlying** instance (native or shim).
+ *
+ * `lib-jitsi-meet` (and similar) often replace `window.RTCPeerConnection` after load. If PeerMetrics
+ * wrapped the browser before that script ran, call again with the same `existingEmitter` to chain
+ * outside the shim. Idempotent while our wrapper is still the global constructor.
+ */
+export function wrapPeerConnection(global: any, existingEmitter?: EventEmitter | null): false | EventEmitter {
+  if (!global || !global.RTCPeerConnection) {
+    return false
   }
 
-  return false
+  const Current = global.RTCPeerConnection as any
+  if (Current[PEERMETRICS_PC_WRAP]) {
+    if (existingEmitter) {
+      return existingEmitter
+    }
+    return Current.__peerMetricsEmitter || false
+  }
+
+  const inner = Current
+  const peerConnectionEventEmitter = existingEmitter || new EventEmitter()
+
+  const WrappedRTCPeerConnection = function (configuration, constraints) {
+    const peerconnection = new inner(configuration, constraints)
+    peerConnectionEventEmitter.emit('newRTCPeerconnection', peerconnection)
+    return peerconnection
+  } as any
+  WrappedRTCPeerConnection.prototype = inner.prototype
+  WrappedRTCPeerConnection[PEERMETRICS_PC_WRAP] = true
+  WrappedRTCPeerConnection.__peerMetricsEmitter = peerConnectionEventEmitter
+  global.RTCPeerConnection = WrappedRTCPeerConnection
+
+  return peerConnectionEventEmitter
 }

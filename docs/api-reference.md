@@ -208,6 +208,7 @@ await peerMetrics.addSdkIntegration({
 #### Parameters
 - **options** (object): One integration key per call (e.g. **livekit**, **twilioVideo**, **mediasoup**, **janus**, **vonage**, **agora**, **jitsi**, **pion**). **jitsi** / **pion**: `true` or `{ serverId?, serverName? }`.
 - Stacks without an adapter (e.g. **SimplePeer**): use `addConnection({ pc, peerId })` — [integrations.md](./integrations.md).
+- For **jitsi**, passing `conference` (a JitsiConference instance) enables participant lifecycle custom events (`jitsiUserJoined`, `jitsiUserLeft`, `jitsiDisplayNameChanged`, `jitsiTrackAdded`, `jitsiTrackRemoved`).
 
 #### Returns
 - `Promise<void>`: Resolves when integration is complete

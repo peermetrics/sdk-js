@@ -353,6 +353,14 @@ await peerMetrics.addSdkIntegration({
 Jitsi and Pion can emit multiple RTCPeerConnections; PeerMetrics tracks each one under the integration peer with a distinct `connectionId`.
 Without a working wrap, integration throws (same idea as Vonage / Agora).
 
+When `conference` is provided for Jitsi, PeerMetrics also forwards lifecycle custom events:
+- `jitsiUserJoined`
+- `jitsiUserLeft`
+- `jitsiDisplayNameChanged`
+- `jitsiTrackAdded` / `jitsiTrackRemoved` (best-effort participant hints)
+
+Known backend assumption: conference/participant counters are computed by backend aggregation of connection + lifecycle events. If events are visible but counters/graphs are inconsistent, investigate backend aggregation logic.
+
 ## 🔗 SimplePeer Integration
 
 ### Setup

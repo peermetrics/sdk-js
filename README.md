@@ -463,6 +463,10 @@ Notes:
 - `wrapPeerConnection: true` (or `PeerMetrics.wrapPeerConnection()`) must be enabled before Jitsi creates peer connections.
 - If you pass `conference`, call `addSdkIntegration({ jitsi })` after `initJitsiConference(...)` so you can provide the live room instance.
 - Multiple Jitsi peer connections are supported under one `peerId` and are tracked with distinct `connectionId`s.
+- `conference` adds participant lifecycle custom events (`jitsiUserJoined`, `jitsiUserLeft`, `jitsiDisplayNameChanged`, track add/remove hints); transport stats still come from monitored RTCPeerConnections.
+
+Known backend assumption:
+- Conference and participant counters depend on backend aggregation of these lifecycle and connection events. If counters are off while events are present, the issue is likely in backend aggregation logic rather than SDK emission.
 
 See the runnable demo in [`examples/jitsi.html`](./examples/jitsi.html), which lets you point the integration at `meet.jit.si` or a self-hosted Jitsi server.
 

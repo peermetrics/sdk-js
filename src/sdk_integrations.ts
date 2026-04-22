@@ -11,6 +11,11 @@ export default class SdkIntegration extends EventEmitter {
     foundIntegration: boolean = false
     webrtcSDK: WebrtcSDKs
     private _emittedPCs: WeakSet<RTCPeerConnection> = new WeakSet()
+    private _jitsiParticipantSnapshots: Map<string, { displayName?: string; isPresent?: boolean }> = new Map()
+    private _jitsiTrackParticipantHints: WeakMap<object, string> = new WeakMap()
+    private _jitsiTransportPeerId: string = ''
+    private _jitsiTransportPeerName: string = ''
+    private _jitsiConferenceAttachGuard: WeakSet<object> = new WeakSet()
 
     addIntegration(options: SdkIntegrationInterface, peerConnectionEventEmitter: null | EventEmitter): boolean {
 
@@ -294,11 +299,15 @@ export default class SdkIntegration extends EventEmitter {
 
         let peerId = this.checkServerId(serverId);
         let peerName = this.checkServerName(serverName);
+        this._jitsiTransportPeerId = peerId
+        this._jitsiTransportPeerName = peerName
 
         if (!peerConnectionEventEmitter) {
             throw new Error("Could not integrate with Jitsi. Please make sure you set PeerMetricsOptions.wrapPeerConnection before loading the PeerMetrics script.");            
         }
 
+        // Register before any JitsiConnection / RTCPeerConnection may be created,
+        // otherwise early PCs are never observed and /stats never flows.
         peerConnectionEventEmitter.on('newRTCPeerconnection', (pc) => {
             this._addJitsiConnection(pc, peerId, peerName)
         })
@@ -309,21 +318,83 @@ export default class SdkIntegration extends EventEmitter {
         // events so the dashboard can surface remote participants even
         // though the SFU transport is monitored as a single peer.
         if (conference) {
-            this._attachJitsiConferenceEvents(conference)
+            this.attachJitsiConference(conference)
         }
 
         this.webrtcSDK = 'jitsi';
         this.foundIntegration = true;
     }
 
+    /**
+     * Attach participant lifecycle listeners to a `JitsiConference` after it exists.
+     * Call once per conference instance (safe to call again on a new conference).
+     * Transport hook must already be registered via `addJitsiIntegration`.
+     */
+    attachJitsiConference(conference: any): void {
+        if (!conference) return
+        if (this._jitsiConferenceAttachGuard.has(conference)) return
+        this._jitsiConferenceAttachGuard.add(conference)
+        this._attachJitsiConferenceEvents(conference)
+    }
+
+    private _buildScopedJitsiPeerId(baseId: string, suffix: string): string {
+        const id = `${baseId}-${suffix}`
+        if (id.length <= CONSTRAINTS.peer.idLength) return id
+        return id.slice(0, CONSTRAINTS.peer.idLength)
+    }
+
+    private _inferJitsiTransportKind(pc: any): 'p2p' | 'jvb' | 'unknown' {
+        const candidates = [
+            pc?.isP2P,
+            pc?.p2p,
+            pc?.traceablePeerConnection?.isP2P,
+            pc?.tpc?.isP2P,
+            pc?.owner?._isP2P
+        ]
+        if (candidates.some(v => v === true)) return 'p2p'
+        if (candidates.some(v => v === false)) return 'jvb'
+
+        const textHints = [
+            pc?.id,
+            pc?.name,
+            pc?.label,
+            pc?.connectionId,
+            pc?._id,
+            pc?.__id
+        ].filter(Boolean).map((v: any) => String(v).toLowerCase())
+
+        if (textHints.some((v: string) => v.includes('p2p'))) return 'p2p'
+        if (textHints.some((v: string) => v.includes('jvb') || v.includes('bridge') || v.includes('sfu'))) return 'jvb'
+        return 'unknown'
+    }
+
+    private _inferJitsiTransportKindFromTrack(track: any): 'p2p' | 'jvb' | 'unknown' {
+        if (!track) return 'unknown'
+        const candidate = typeof track.isP2P === 'function' ? track.isP2P() : track.isP2P
+        if (candidate === true) return 'p2p'
+        if (candidate === false) return 'jvb'
+        return 'unknown'
+    }
+
     _addJitsiConnection(pc, peerId, peerName) {
         if (this._emittedPCs.has(pc)) return
         this._emittedPCs.add(pc)
 
+        const kind = this._inferJitsiTransportKind(pc)
+        let scopedPeerId = peerId
+        let scopedPeerName = peerName
+        if (kind === 'p2p') {
+            scopedPeerId = this._buildScopedJitsiPeerId(peerId, 'p2p')
+            scopedPeerName = `${peerName} (P2P)`
+        } else if (kind === 'jvb') {
+            scopedPeerId = this._buildScopedJitsiPeerId(peerId, 'jvb')
+            scopedPeerName = `${peerName} (JVB/SFU)`
+        }
+
         this.emit('newConnection', {
             pc,
-            peerId,
-            peerName,
+            peerId: scopedPeerId,
+            peerName: scopedPeerName,
             isSfu: true,
             remote: true
         })
@@ -351,28 +422,181 @@ export default class SdkIntegration extends EventEmitter {
             }
         }
 
-        safeOn(events.USER_JOINED, (id: string, participant: any) => {
+        const emitParticipantEvent = (eventName: string, participantId: string, data: object = {}) => {
+            const snapshot = this._jitsiParticipantSnapshots.get(participantId) || {}
             this.emit('jitsiParticipantEvent', {
-                eventName: 'jitsiUserJoined',
-                participantId: id,
-                displayName: typeof participant?.getDisplayName === 'function' ? participant.getDisplayName() : undefined
+                eventName,
+                participantId,
+                displayName: snapshot.displayName,
+                ...data
             })
+        }
+
+        safeOn(events.USER_JOINED, (id: string, participant: any) => {
+            const previous = this._jitsiParticipantSnapshots.get(id)
+            if (previous?.isPresent) return
+            const displayName = typeof participant?.getDisplayName === 'function'
+                ? participant.getDisplayName()
+                : undefined
+            this._jitsiParticipantSnapshots.set(id, { displayName, isPresent: true })
+            emitParticipantEvent('jitsiUserJoined', id)
         })
 
         safeOn(events.USER_LEFT, (id: string) => {
-            this.emit('jitsiParticipantEvent', {
-                eventName: 'jitsiUserLeft',
-                participantId: id
-            })
+            const previous = this._jitsiParticipantSnapshots.get(id)
+            if (!previous?.isPresent) return
+            emitParticipantEvent('jitsiUserLeft', id)
+            this._jitsiParticipantSnapshots.set(id, { ...previous, isPresent: false })
         })
 
         safeOn(events.DISPLAY_NAME_CHANGED, (id: string, displayName: string) => {
-            this.emit('jitsiParticipantEvent', {
-                eventName: 'jitsiDisplayNameChanged',
-                participantId: id,
-                displayName
+            const snapshot = this._jitsiParticipantSnapshots.get(id) || {}
+            snapshot.displayName = displayName
+            this._jitsiParticipantSnapshots.set(id, snapshot)
+            emitParticipantEvent('jitsiDisplayNameChanged', id, { displayName })
+        })
+
+        // Keep best-effort hints about which participant owns a track to support
+        // deterministic enrichment of custom events and future per-track attribution.
+        safeOn(events.TRACK_ADDED, (track: any) => {
+            const participantId = this._extractParticipantIdFromTrack(track)
+            if (!participantId || !track) return
+            this._jitsiTrackParticipantHints.set(track, participantId)
+            const transportType = this._inferJitsiTransportKindFromTrack(track)
+            emitParticipantEvent('jitsiTrackAdded', participantId, {
+                transportType,
+                trackType: typeof track.getType === 'function' ? track.getType() : undefined,
+                trackId: typeof track.getTrackId === 'function' ? track.getTrackId() : undefined
             })
         })
+
+        safeOn(events.TRACK_REMOVED, (track: any) => {
+            const hintedParticipantId = track ? this._jitsiTrackParticipantHints.get(track) : undefined
+            const participantId = hintedParticipantId || this._extractParticipantIdFromTrack(track)
+            if (!participantId) return
+            const transportType = this._inferJitsiTransportKindFromTrack(track)
+            emitParticipantEvent('jitsiTrackRemoved', participantId, {
+                transportType,
+                trackType: typeof track?.getType === 'function' ? track.getType() : undefined,
+                trackId: typeof track?.getTrackId === 'function' ? track.getTrackId() : undefined
+            })
+            if (track) {
+                this._jitsiTrackParticipantHints.delete(track)
+            }
+        })
+
+        const clearConferenceState = (reason: string) => {
+            if (this._jitsiParticipantSnapshots.size > 0) {
+                this.emit('jitsiParticipantEvent', {
+                    eventName: 'jitsiConferenceReset',
+                    reason,
+                    participantsTracked: this._jitsiParticipantSnapshots.size
+                })
+            }
+            this._jitsiParticipantSnapshots.clear()
+            this._jitsiTrackParticipantHints = new WeakMap()
+        }
+
+        const runPcDiscovery = () => {
+            try {
+                this._discoverJitsiPeerConnectionsUnderConference(conference)
+            } catch {
+                // best-effort: discovery is optional across Jitsi versions
+            }
+        }
+
+        if (events.CONFERENCE_JOINED) {
+            safeOn(events.CONFERENCE_JOINED, () => {
+                runPcDiscovery()
+                if (typeof window !== 'undefined' && typeof window.setTimeout === 'function') {
+                    window.setTimeout(runPcDiscovery, 400)
+                    window.setTimeout(runPcDiscovery, 2000)
+                }
+            })
+        }
+
+        safeOn(events.CONFERENCE_LEFT, () => clearConferenceState('conference-left'))
+        safeOn(events.CONFERENCE_FAILED, () => clearConferenceState('conference-failed'))
+    }
+
+    /**
+     * Walk the conference object graph to find RTCPeerConnection instances lib-jitsi-meet
+     * may have created before our wrap listener was registered (or that never go through window.RTCPeerConnection).
+     */
+    private _discoverJitsiPeerConnectionsUnderConference(root: any): void {
+        const peerId = this._jitsiTransportPeerId
+        const peerName = this._jitsiTransportPeerName
+        if (!peerId || !root || typeof root !== 'object') return
+
+        const visited = new WeakSet<object>()
+        let nodes = 0
+        const MAX_NODES = 12000
+
+        const walk = (obj: any, depth: number): void => {
+            if (obj == null || depth < 0 || nodes > MAX_NODES) return
+            if (typeof obj !== 'object') return
+            if (visited.has(obj)) return
+            visited.add(obj)
+            nodes++
+
+            try {
+                if (typeof RTCPeerConnection !== 'undefined' && obj instanceof RTCPeerConnection) {
+                    this._addJitsiConnection(obj, peerId, peerName)
+                    return
+                }
+            } catch {
+                return
+            }
+
+            let keys: (string | symbol)[]
+            try {
+                keys = Reflect.ownKeys(obj)
+            } catch {
+                return
+            }
+
+            for (const key of keys) {
+                if (typeof key === 'symbol') continue
+                const k = key as string
+                if (k === 'parent' || k === 'window' || k === 'document' || k === 'top' || k === 'self') continue
+                try {
+                    const desc = Object.getOwnPropertyDescriptor(obj, k)
+                    if (desc && typeof desc.get === 'function') {
+                        try {
+                            walk(desc.get.call(obj), depth - 1)
+                        } catch {
+                            /* private / throwing getter */
+                        }
+                    } else {
+                        walk((obj as any)[k], depth - 1)
+                    }
+                } catch {
+                    /* ignore */
+                }
+            }
+        }
+
+        walk(root, 12)
+    }
+
+    private _extractParticipantIdFromTrack(track: any): string | null {
+        if (!track) return null
+
+        if (typeof track.getParticipantId === 'function') {
+            const id = track.getParticipantId()
+            if (typeof id === 'string' && id) return id
+        }
+
+        const owner = typeof track.getParticipant === 'function' ? track.getParticipant() : null
+        if (owner) {
+            const ownerId = typeof owner.getId === 'function' ? owner.getId() : owner.id
+            if (typeof ownerId === 'string' && ownerId) return ownerId
+        }
+
+        const endpointId = track.getParticipantId || track.ownerEndpointId || track.endpointId
+        if (typeof endpointId === 'string' && endpointId) return endpointId
+
+        return null
     }
 
     _searchExistingJitsiConnections(peerId, peerName) {
