@@ -22,16 +22,16 @@ const EXPONENTIAL_BACKOFF = 500
 const MAX_EXPONENTIAL_BACKOFF = 60 * 1000
 
 function withTimeout<T> (promise: Promise<T>, timeoutMs: number): Promise<T> {
-  let timeoutId: number | null = null
+  let timeoutId: ReturnType<typeof setTimeout> | null = null
   const timeoutPromise = new Promise<T>((_, reject) => {
-    timeoutId = window.setTimeout(() => {
+    timeoutId = globalThis.setTimeout(() => {
       reject(new Error('request timeout'))
     }, timeoutMs)
   })
 
   return Promise.race([promise, timeoutPromise]).finally(() => {
     if (timeoutId !== null) {
-      clearTimeout(timeoutId)
+      globalThis.clearTimeout(timeoutId)
     }
   })
 }

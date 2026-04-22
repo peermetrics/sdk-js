@@ -99,6 +99,41 @@ describe('SdkIntegration - Jitsi transport handling', () => {
       /Could not integrate with Jitsi/
     )
   })
+
+  it('preserves Jitsi transport suffix when serverId is near max length', () => {
+    const events: Array<any> = []
+    integration.on('newConnection', (payload) => events.push(payload))
+
+    const baseId = 'x'.repeat(64)
+    integration.addJitsiIntegration({ serverId: baseId }, emitter)
+
+    const p2pPC = makeFakePCWithKind('p2p', true)
+    const jvbPC = makeFakePCWithKind('jvb', false)
+    emitter.emit('newRTCPeerconnection', p2pPC)
+    emitter.emit('newRTCPeerconnection', jvbPC)
+
+    expect(events).toHaveLength(2)
+    expect(events[0].peerId.endsWith('-p2p')).toBe(true)
+    expect(events[1].peerId.endsWith('-jvb')).toBe(true)
+    expect(events[0].peerId.length).toBeLessThanOrEqual(64)
+    expect(events[1].peerId.length).toBeLessThanOrEqual(64)
+    expect(events[0].peerId).not.toBe(events[1].peerId)
+  })
+
+  it('keeps LiveKit direction suffix and id length constraint', () => {
+    const events: Array<any> = []
+    integration.on('newConnection', (payload) => events.push(payload))
+
+    const serverId = 'y'.repeat(64)
+    integration._addLiveKitConnection(makeFakePC('livekit-out'), serverId, 'LiveKit SFU', 'outbound')
+    integration._addLiveKitConnection(makeFakePC('livekit-in'), serverId, 'LiveKit SFU', 'inbound')
+
+    expect(events).toHaveLength(2)
+    expect(events[0].peerId.endsWith('-outbound')).toBe(true)
+    expect(events[1].peerId.endsWith('-inbound')).toBe(true)
+    expect(events[0].peerId.length).toBeLessThanOrEqual(64)
+    expect(events[1].peerId.length).toBeLessThanOrEqual(64)
+  })
 })
 
 describe('SdkIntegration - Jitsi conference events', () => {

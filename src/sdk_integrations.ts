@@ -135,9 +135,10 @@ export default class SdkIntegration extends EventEmitter {
     }
 
     _addLiveKitConnection(pc, serverId, serverName, direction) {
+        const scopedPeerId = this._buildScopedPeerId(serverId, direction)
         this.emit('newConnection', {
             pc: pc,
-            peerId: `${serverId}-${direction}`,
+            peerId: scopedPeerId,
             peerName: `${serverName} ${direction}`,
             isSfu: true,
             remote: true
@@ -337,10 +338,26 @@ export default class SdkIntegration extends EventEmitter {
         this._attachJitsiConferenceEvents(conference)
     }
 
+    private _buildScopedPeerId(baseId: string, suffix: string): string {
+        const safeBase = String(baseId || '')
+        const safeSuffix = String(suffix || '')
+        if (!safeSuffix) return safeBase.slice(0, CONSTRAINTS.peer.idLength)
+
+        const separator = '-'
+        const suffixPart = separator + safeSuffix
+        const maxLen = CONSTRAINTS.peer.idLength
+        const maxBaseLen = Math.max(0, maxLen - suffixPart.length)
+
+        if (maxBaseLen === 0) {
+            return safeSuffix.slice(0, maxLen)
+        }
+
+        const trimmedBase = safeBase.slice(0, maxBaseLen)
+        return `${trimmedBase}${suffixPart}`
+    }
+
     private _buildScopedJitsiPeerId(baseId: string, suffix: string): string {
-        const id = `${baseId}-${suffix}`
-        if (id.length <= CONSTRAINTS.peer.idLength) return id
-        return id.slice(0, CONSTRAINTS.peer.idLength)
+        return this._buildScopedPeerId(baseId, suffix)
     }
 
     private _inferJitsiTransportKind(pc: any): 'p2p' | 'jvb' | 'unknown' {
