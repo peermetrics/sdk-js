@@ -16,12 +16,14 @@ export default class SdkIntegration extends EventEmitter {
     private _jitsiTransportPeerId: string = ''
     private _jitsiTransportPeerName: string = ''
     private _jitsiConferenceAttachGuard: WeakSet<object> = new WeakSet()
+    private _liveKitPcMeta: WeakMap<object, { direction: string; source: string }> = new WeakMap()
+    private _liveKitWrapPending: WeakSet<object> = new WeakSet()
 
     addIntegration(options: SdkIntegrationInterface, peerConnectionEventEmitter: null | EventEmitter): boolean {
 
         this.addMediaSoupIntegration(options.mediasoup)
         this.addJanusIntegration(options.janus)
-        this.addLivekitIntegration(options.livekit)
+        this.addLivekitIntegration(options.livekit, peerConnectionEventEmitter)
         this.addTwilioVideoIntegration(options.twilioVideo)
         this.addVonageIntegration(options.vonage, peerConnectionEventEmitter)
         this.addAgoraIntegration(options.agora, peerConnectionEventEmitter)
@@ -107,7 +109,7 @@ export default class SdkIntegration extends EventEmitter {
         this.foundIntegration = true
     }
 
-    addLivekitIntegration(options) {
+    addLivekitIntegration(options, peerConnectionEventEmitter?: EventEmitter | null) {
         if (!options) return
 
         let { room, serverId = 'livekit-sfu-server', serverName = 'LiveKit SFU Server' } = options
@@ -121,25 +123,82 @@ export default class SdkIntegration extends EventEmitter {
 
         serverName = this.checkServerName(serverName)
 
+        if (peerConnectionEventEmitter) {
+            peerConnectionEventEmitter.on('newRTCPeerconnection', (pc) => {
+                this._handleLiveKitWrappedPc(pc, room, serverId, serverName)
+            })
+        }
+
         // Listen for LiveKit transport creation events
         room.engine.on('transportsCreated', (publisher, subscriber) => {
-            this._addLiveKitConnection(publisher.pc, serverId, serverName, 'outbound')
-            this._addLiveKitConnection(subscriber.pc, serverId, serverName, 'inbound')
+            this._rememberLiveKitPcMeta(publisher?.pc, 'outbound', 'transportsCreated')
+            this._rememberLiveKitPcMeta(subscriber?.pc, 'inbound', 'transportsCreated')
+            this._addLiveKitConnection(publisher?.pc, serverId, serverName, 'outbound')
+            this._addLiveKitConnection(subscriber?.pc, serverId, serverName, 'inbound')
         })
         
-        // Search for existing connections as fallback
+        // Search existing/late-created connections as fallback (some builds create transports
+        // before or after the event hook timing). Repeated scans are safe via PC dedupe.
+        this._searchExistingLiveKitConnections(room, serverId, serverName)
+        setTimeout(() => this._searchExistingLiveKitConnections(room, serverId, serverName), 250)
         setTimeout(() => this._searchExistingLiveKitConnections(room, serverId, serverName), 1000)
+        setTimeout(() => this._searchExistingLiveKitConnections(room, serverId, serverName), 3000)
 
         this.webrtcSDK = 'livekit'
         this.foundIntegration = true
     }
 
+    private _rememberLiveKitPcMeta(pc: any, direction: string, source: string) {
+        if (!pc) return
+        this._liveKitPcMeta.set(pc, { direction, source })
+    }
+
+    private _inferLiveKitDirectionFromRoom(room: any, pc: any): string {
+        if (!pc || !room?.engine) return 'unknown'
+        if (room.engine?.publisher?.pc === pc || room.engine?.pcManager?.publisher?.pc === pc) return 'outbound'
+        if (room.engine?.subscriber?.pc === pc || room.engine?.pcManager?.subscriber?.pc === pc) return 'inbound'
+        if (room.engine?.pcManager?.pc === pc || room.engine?.transport?.pc === pc) return 'transport'
+        return 'unknown'
+    }
+
+    private _handleLiveKitWrappedPc(pc: any, room: any, serverId: string, serverName: string) {
+        if (!pc) return
+
+        const known = this._liveKitPcMeta.get(pc)
+        const direction = known?.direction || this._inferLiveKitDirectionFromRoom(room, pc)
+        if (direction !== 'unknown') {
+            this._rememberLiveKitPcMeta(pc, direction, known?.source || 'wrap')
+            this._addLiveKitConnection(pc, serverId, serverName, direction)
+            return
+        }
+
+        if (this._liveKitWrapPending.has(pc)) return
+        this._liveKitWrapPending.add(pc)
+
+        const retryDelays = [50, 200, 1000]
+        retryDelays.forEach((delayMs) => {
+            setTimeout(() => {
+                const meta = this._liveKitPcMeta.get(pc)
+                const retryDirection = meta?.direction || this._inferLiveKitDirectionFromRoom(room, pc)
+                if (retryDirection !== 'unknown') {
+                    this._rememberLiveKitPcMeta(pc, retryDirection, meta?.source || 'wrap-retry')
+                    this._addLiveKitConnection(pc, serverId, serverName, retryDirection)
+                    this._liveKitWrapPending.delete(pc)
+                }
+            }, delayMs)
+        })
+    }
+
     _addLiveKitConnection(pc, serverId, serverName, direction) {
+        if (!pc) return
+        if (this._emittedPCs.has(pc)) return
+        this._emittedPCs.add(pc)
+        this._rememberLiveKitPcMeta(pc, direction, 'emit')
         const scopedPeerId = this._buildScopedPeerId(serverId, direction)
         this.emit('newConnection', {
             pc: pc,
             peerId: scopedPeerId,
-            peerName: `${serverName} ${direction}`,
+            peerName: serverName,
             isSfu: true,
             remote: true
         })
@@ -147,26 +206,32 @@ export default class SdkIntegration extends EventEmitter {
 
     _searchExistingLiveKitConnections(room, serverId, serverName) {
         try {
-            const connections = []
-            
-            // Check common connection locations
-            const locations = [
-                room.engine?.pcManager?.pc,
-                room.engine?.publisher?.pc,
-                room.engine?.subscriber?.pc,
-                room.engine?.transport?.pc
-            ]
-            
-            locations.forEach(pc => pc && connections.push(pc))
+            const labeledConnections: Array<{ pc: any; direction: string }> = []
+            const pushLabeled = (pc: any, direction: string) => {
+                if (!pc) return
+                labeledConnections.push({ pc, direction })
+            }
+
+            // Check known direction-bearing locations first.
+            pushLabeled(room.engine?.publisher?.pc, 'outbound')
+            pushLabeled(room.engine?.subscriber?.pc, 'inbound')
+            pushLabeled(room.engine?.pcManager?.publisher?.pc, 'outbound')
+            pushLabeled(room.engine?.pcManager?.subscriber?.pc, 'inbound')
+            pushLabeled(room.engine?.pcManager?.pc, 'transport')
+            pushLabeled(room.engine?.transport?.pc, 'transport')
             
             // Deep search if no connections found
-            if (connections.length === 0 && room.engine) {
-                this._deepSearchForConnections(room.engine, connections)
+            if (labeledConnections.length === 0 && room.engine) {
+                const deepConnections: any[] = []
+                this._deepSearchForConnections(room.engine, deepConnections)
+                deepConnections.forEach((pc) => {
+                    const direction = this._inferLiveKitDirectionFromRoom(room, pc)
+                    pushLabeled(pc, direction === 'unknown' ? 'transport' : direction)
+                })
             }
             
-            // Add found connections with descriptive direction names
-            connections.forEach((pc, index) => {
-                const direction = index === 0 ? 'outbound' : 'inbound'
+            labeledConnections.forEach(({ pc, direction }) => {
+                this._rememberLiveKitPcMeta(pc, direction, 'scan')
                 this._addLiveKitConnection(pc, serverId, serverName, direction)
             })
             

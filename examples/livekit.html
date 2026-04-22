@@ -69,6 +69,7 @@
         let localVideo = null
         let remoteVideo = null
         let resolvedConferenceId = ''
+        const observedPeerConnections = new WeakSet()
         
         // Initialize video elements immediately
         function initVideoElements() {
@@ -140,6 +141,49 @@
             logEl.scrollTop = logEl.scrollHeight
             console.log(message)
         }
+
+        function attachPcDiagnostics(pc, label) {
+            if (!pc || observedPeerConnections.has(pc)) return
+            observedPeerConnections.add(pc)
+
+            log(`🧪 Attached PC diagnostics: ${label}`)
+            log(`   ↳ initial states: ice=${pc.iceConnectionState}, conn=${pc.connectionState}, signaling=${pc.signalingState}`)
+
+            pc.addEventListener('iceconnectionstatechange', () => {
+                log(`🧊 [${label}] iceConnectionState -> ${pc.iceConnectionState}`)
+            })
+            pc.addEventListener('connectionstatechange', () => {
+                log(`🔌 [${label}] connectionState -> ${pc.connectionState}`)
+            })
+            pc.addEventListener('icegatheringstatechange', () => {
+                log(`📡 [${label}] iceGatheringState -> ${pc.iceGatheringState}`)
+            })
+            pc.addEventListener('signalingstatechange', () => {
+                log(`📨 [${label}] signalingState -> ${pc.signalingState}`)
+            })
+            pc.addEventListener('icecandidate', (event) => {
+                if (event && event.candidate) {
+                    log(`🧾 [${label}] ICE candidate gathered`)
+                } else {
+                    log(`🧾 [${label}] ICE gathering complete`)
+                }
+            })
+        }
+
+        function observeLiveKitPeerConnections() {
+            if (!room || !room.engine) return
+
+            const checks = [
+                { pc: room.engine?.publisher?.pc, label: 'publisher/outbound' },
+                { pc: room.engine?.subscriber?.pc, label: 'subscriber/inbound' },
+                { pc: room.engine?.pcManager?.publisher?.pc, label: 'pcManager publisher/outbound' },
+                { pc: room.engine?.pcManager?.subscriber?.pc, label: 'pcManager subscriber/inbound' },
+                { pc: room.engine?.pcManager?.pc, label: 'pcManager transport' },
+                { pc: room.engine?.transport?.pc, label: 'engine transport' }
+            ]
+
+            checks.forEach(({ pc, label }) => attachPcDiagnostics(pc, label))
+        }
         
         // Initialize PeerMetrics
         async function initPeerMetrics() {
@@ -210,9 +254,11 @@
                     disconnectBtn.disabled = false
                     toggleVideoBtn.disabled = false
                     toggleAudioBtn.disabled = false
+                    observeLiveKitPeerConnections()
                     
                     // Add a small delay to let connections be established
                     setTimeout(() => {
+                        observeLiveKitPeerConnections()
                         log('🎯 LiveKit session ready - PeerMetrics monitoring active')
                     }, 2000)
                 })
@@ -290,6 +336,9 @@
                 try {
                     await room.connect(livekitUrl, livekitToken)
                     log('✅ Successfully connected to LiveKit room')
+                    setTimeout(observeLiveKitPeerConnections, 150)
+                    setTimeout(observeLiveKitPeerConnections, 600)
+                    setTimeout(observeLiveKitPeerConnections, 1500)
                 } catch (connectError) {
                     log(`❌ LiveKit connection failed: ${connectError.message}`)
                     throw connectError

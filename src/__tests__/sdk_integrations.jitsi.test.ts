@@ -136,6 +136,87 @@ describe('SdkIntegration - Jitsi transport handling', () => {
   })
 })
 
+describe('SdkIntegration - LiveKit capture ordering and dedupe', () => {
+  let emitter: EventEmitter
+  let integration: SdkIntegration
+  let room: any
+
+  beforeEach(() => {
+    jest.useFakeTimers()
+    emitter = new EventEmitter()
+    integration = new SdkIntegration()
+    room = {
+      engine: new EventEmitter()
+    }
+  })
+
+  afterEach(() => {
+    jest.useRealTimers()
+  })
+
+  it('captures wrapped livekit PCs even before transportsCreated', () => {
+    const events: any[] = []
+    integration.on('newConnection', (payload) => events.push(payload))
+
+    const outbound = makeFakePC('lk-out-early')
+    const inbound = makeFakePC('lk-in-early')
+    room.engine.publisher = { pc: outbound }
+    room.engine.subscriber = { pc: inbound }
+
+    integration.addLivekitIntegration({ room, serverId: 'livekit-server', serverName: 'LiveKit Server' }, emitter)
+
+    emitter.emit('newRTCPeerconnection', outbound)
+    emitter.emit('newRTCPeerconnection', inbound)
+    jest.runOnlyPendingTimers()
+
+    expect(events).toHaveLength(2)
+    expect(events[0]).toMatchObject({ pc: outbound, peerId: 'livekit-server-outbound', peerName: 'LiveKit Server' })
+    expect(events[1]).toMatchObject({ pc: inbound, peerId: 'livekit-server-inbound', peerName: 'LiveKit Server' })
+  })
+
+  it('dedupes when transportsCreated and wrapper both report same PCs', () => {
+    const events: any[] = []
+    integration.on('newConnection', (payload) => events.push(payload))
+
+    const outbound = makeFakePC('lk-out-both')
+    const inbound = makeFakePC('lk-in-both')
+    room.engine.publisher = { pc: outbound }
+    room.engine.subscriber = { pc: inbound }
+
+    integration.addLivekitIntegration({ room, serverId: 'livekit-server', serverName: 'LiveKit Server' }, emitter)
+    room.engine.emit('transportsCreated', { pc: outbound }, { pc: inbound })
+    emitter.emit('newRTCPeerconnection', outbound)
+    emitter.emit('newRTCPeerconnection', inbound)
+    jest.runOnlyPendingTimers()
+
+    expect(events).toHaveLength(2)
+    expect(events.map((ev) => ev.peerId)).toEqual(['livekit-server-outbound', 'livekit-server-inbound'])
+  })
+
+  it('resolves wrapped PC direction when metadata arrives later', () => {
+    const events: any[] = []
+    integration.on('newConnection', (payload) => events.push(payload))
+
+    const outbound = makeFakePC('lk-out-late')
+    room.engine.publisher = { pc: null }
+    room.engine.subscriber = { pc: null }
+
+    integration.addLivekitIntegration({ room, serverId: 'livekit-server', serverName: 'LiveKit Server' }, emitter)
+    emitter.emit('newRTCPeerconnection', outbound)
+    expect(events).toHaveLength(0)
+
+    room.engine.emit('transportsCreated', { pc: outbound }, null)
+    jest.advanceTimersByTime(1000)
+
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({
+      pc: outbound,
+      peerId: 'livekit-server-outbound',
+      peerName: 'LiveKit Server'
+    })
+  })
+})
+
 describe('SdkIntegration - Jitsi conference events', () => {
   beforeEach(() => {
     // Mimic JitsiMeetJS.events.conference on window
