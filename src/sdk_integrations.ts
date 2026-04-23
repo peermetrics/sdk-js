@@ -1,7 +1,7 @@
 import { EventEmitter } from 'events'
 
 import { CONSTRAINTS } from "./constants";
-import { inferJitsiTransportKind, log } from './utils'
+import { inferJitsiTransportKind, log, forEachJitsiPeerConnection } from './utils'
 
 import type {
     SdkIntegrationInterface,
@@ -288,9 +288,7 @@ export default class SdkIntegration extends EventEmitter {
     addVonageIntegration(vonage: boolean, peerConnectionEventEmitter: EventEmitter) {
         if (!vonage) return
 
-        if (!peerConnectionEventEmitter) {
-            throw new Error("Could not integrate with Vonage. Please make sure you set PeerMetricsOptions.wrapPeerConnection before loading the PeerMetrics script.");            
-        }
+        this._requireWrapEmitter(peerConnectionEventEmitter, 'Vonage')
 
         peerConnectionEventEmitter.on('newRTCPeerconnection', (pc) => {
             this.emit('newConnection', {
@@ -309,9 +307,7 @@ export default class SdkIntegration extends EventEmitter {
     addAgoraIntegration(agora: boolean, peerConnectionEventEmitter: EventEmitter) {
         if (!agora) return
 
-        if (!peerConnectionEventEmitter) {
-            throw new Error("Could not integrate with agora. Please make sure you set PeerMetricsOptions.wrapPeerConnection before loading the PeerMetrics script.");            
-        }
+        this._requireWrapEmitter(peerConnectionEventEmitter, 'agora')
 
         peerConnectionEventEmitter.on('newRTCPeerconnection', (pc) => {
             this.emit('newConnection', {
@@ -340,9 +336,7 @@ export default class SdkIntegration extends EventEmitter {
         serverId = this.checkServerId(serverId);
         serverName = this.checkServerName(serverName);
 
-        if (!peerConnectionEventEmitter) {
-            throw new Error("Could not integrate with Pion. Please make sure you set PeerMetricsOptions.wrapPeerConnection before loading the PeerMetrics script.");
-        }
+        this._requireWrapEmitter(peerConnectionEventEmitter, 'Pion')
 
         peerConnectionEventEmitter.on('newRTCPeerconnection', (pc) => {
             this.emit('newConnection', {
@@ -372,9 +366,7 @@ export default class SdkIntegration extends EventEmitter {
         this._jitsiTransportPeerId = peerId
         this._jitsiTransportPeerName = peerName
 
-        if (!peerConnectionEventEmitter) {
-            throw new Error("Could not integrate with Jitsi. Please make sure you set PeerMetricsOptions.wrapPeerConnection before loading the PeerMetrics script.");            
-        }
+        this._requireWrapEmitter(peerConnectionEventEmitter, 'Jitsi')
 
         // Register before any JitsiConnection / RTCPeerConnection may be created,
         // otherwise early PCs are never observed and /stats never flows.
@@ -425,10 +417,6 @@ export default class SdkIntegration extends EventEmitter {
         return `${trimmedBase}${suffixPart}`
     }
 
-    private _buildScopedJitsiPeerId(baseId: string, suffix: string): string {
-        return this._buildScopedPeerId(baseId, suffix)
-    }
-
     private _inferJitsiTransportKindFromTrack(track: any): 'p2p' | 'jvb' | 'unknown' {
         if (!track) return 'unknown'
         const candidate = typeof track.isP2P === 'function' ? track.isP2P() : track.isP2P
@@ -445,10 +433,10 @@ export default class SdkIntegration extends EventEmitter {
         let scopedPeerId = peerId
         let scopedPeerName = peerName
         if (kind === 'p2p') {
-            scopedPeerId = this._buildScopedJitsiPeerId(peerId, 'p2p')
+            scopedPeerId = this._buildScopedPeerId(peerId, 'p2p')
             scopedPeerName = `${peerName} (P2P)`
         } else if (kind === 'jvb') {
-            scopedPeerId = this._buildScopedJitsiPeerId(peerId, 'jvb')
+            scopedPeerId = this._buildScopedPeerId(peerId, 'jvb')
             scopedPeerName = `${peerName} (JVB/SFU)`
         }
 
@@ -691,42 +679,14 @@ export default class SdkIntegration extends EventEmitter {
      * @private
      */
     private _searchExistingJitsiConnectionsInternal(rtc, peerId: string, peerName: string) {
-        const possiblePaths = [
-            ['peerConnections'],
-            ['pc'],
-            ['peerConnection'],
-            ['rtc', 'peerConnections'],
-            ['rtc', 'pc']
-        ]
+        forEachJitsiPeerConnection(rtc, (pc) => {
+            this._addJitsiConnection(pc, peerId, peerName)
+        })
+    }
 
-        for (const path of possiblePaths) {
-            let current = rtc
-            for (const key of path) {
-                if (current && current[key]) {
-                    current = current[key]
-                } else {
-                    current = null
-                    break
-                }
-            }
-
-            if (current && typeof current === 'object') {
-                if (current instanceof Map) {
-                    for (const [, pc] of current) {
-                        if (pc instanceof RTCPeerConnection) {
-                            this._addJitsiConnection(pc, peerId, peerName)
-                        }
-                    }
-                } else if (Array.isArray(current)) {
-                    current.forEach((pc) => {
-                        if (pc instanceof RTCPeerConnection) {
-                            this._addJitsiConnection(pc, peerId, peerName)
-                        }
-                    })
-                } else if (current instanceof RTCPeerConnection) {
-                    this._addJitsiConnection(current, peerId, peerName)
-                }
-            }
+    private _requireWrapEmitter(peerConnectionEventEmitter: EventEmitter | null | undefined, sdkName: string): void {
+        if (!peerConnectionEventEmitter) {
+            throw new Error(`Could not integrate with ${sdkName}. Please make sure you set PeerMetricsOptions.wrapPeerConnection before loading the PeerMetrics script.`)
         }
     }
 

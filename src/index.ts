@@ -8,7 +8,14 @@ import { DEFAULT_OPTIONS, CONSTRAINTS } from "./constants";
 import {ApiWrapper} from './api-wrapper'
 import SdkIntegration from "./sdk_integrations";
 
-import { enableDebug, log, wrapPeerConnection, PeerMetricsError, inferJitsiTransportKind} from './utils'
+import {
+  enableDebug,
+  log,
+  wrapPeerConnection,
+  PeerMetricsError,
+  inferJitsiTransportKind,
+  forEachJitsiPeerConnection
+} from './utils'
 
 import type {
   PeerMetricsConstructor,
@@ -430,61 +437,15 @@ export class PeerMetrics {
     rtc: any,
     pushConnection: (pc: RTCPeerConnection, peerId: string, source: string) => void
   ) {
-    const possiblePaths = [
-      ['peerConnections'],
-      ['pc'],
-      ['peerConnection'],
-      ['rtc', 'peerConnections'],
-      ['rtc', 'pc']
-    ]
-
-    for (const path of possiblePaths) {
-      let current = rtc
-      for (const key of path) {
-        if (current && current[key]) {
-          current = current[key]
-        } else {
-          current = null
-          break
-        }
-      }
-
-      if (current && typeof current === 'object') {
-        if (current instanceof Map) {
-          for (const [, pc] of current) {
-            if (pc instanceof RTCPeerConnection) {
-              const kind = inferJitsiTransportKind(pc)
-              const peerId = kind === 'p2p'
-                ? 'jitsi-sfu-server-p2p'
-                : kind === 'jvb'
-                  ? 'jitsi-sfu-server-jvb'
-                  : 'jitsi-sfu-server'
-              pushConnection(pc, peerId, 'jitsi-pattern')
-            }
-          }
-        } else if (Array.isArray(current)) {
-          current.forEach((pc) => {
-            if (pc instanceof RTCPeerConnection) {
-              const kind = inferJitsiTransportKind(pc)
-              const peerId = kind === 'p2p'
-                ? 'jitsi-sfu-server-p2p'
-                : kind === 'jvb'
-                  ? 'jitsi-sfu-server-jvb'
-                  : 'jitsi-sfu-server'
-              pushConnection(pc, peerId, 'jitsi-pattern')
-            }
-          })
-        } else if (current instanceof RTCPeerConnection) {
-          const kind = inferJitsiTransportKind(current)
-          const peerId = kind === 'p2p'
-            ? 'jitsi-sfu-server-p2p'
-            : kind === 'jvb'
-              ? 'jitsi-sfu-server-jvb'
-              : 'jitsi-sfu-server'
-          pushConnection(current, peerId, 'jitsi-pattern')
-        }
-      }
-    }
+    forEachJitsiPeerConnection(rtc, (pc) => {
+      const kind = inferJitsiTransportKind(pc)
+      const peerId = kind === 'p2p'
+        ? 'jitsi-sfu-server-p2p'
+        : kind === 'jvb'
+          ? 'jitsi-sfu-server-jvb'
+          : 'jitsi-sfu-server'
+      pushConnection(pc, peerId, 'jitsi-pattern')
+    })
   }
 
   /**

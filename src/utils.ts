@@ -87,3 +87,53 @@ export function inferJitsiTransportKind(pc: any): 'p2p' | 'jvb' | 'unknown' {
   if (textHints.some((v: string) => v.includes('jvb') || v.includes('bridge') || v.includes('sfu'))) return 'jvb'
   return 'unknown'
 }
+
+/**
+ * Iterate RTCPeerConnection instances stored in common lib-jitsi-meet RTC shapes.
+ * Shared by integration and auto-detect paths so they stay behaviorally aligned.
+ */
+export function forEachJitsiPeerConnection (
+  rtc: any,
+  onPeerConnection: (pc: RTCPeerConnection) => void
+): void {
+  if (!rtc || typeof rtc !== 'object') return
+
+  const possiblePaths = [
+    ['peerConnections'],
+    ['pc'],
+    ['peerConnection'],
+    ['rtc', 'peerConnections'],
+    ['rtc', 'pc']
+  ]
+
+  for (const path of possiblePaths) {
+    let current = rtc
+    for (const key of path) {
+      if (current && current[key]) {
+        current = current[key]
+      } else {
+        current = null
+        break
+      }
+    }
+
+    if (!current || typeof current !== 'object') continue
+    if (current instanceof Map) {
+      for (const [, pc] of current) {
+        if (pc instanceof RTCPeerConnection) onPeerConnection(pc)
+      }
+      continue
+    }
+
+    if (Array.isArray(current)) {
+      current.forEach((pc) => {
+        if (pc instanceof RTCPeerConnection) onPeerConnection(pc)
+      })
+      continue
+    }
+
+    if (current instanceof RTCPeerConnection) {
+      onPeerConnection(current)
+    }
+  }
+}
