@@ -1,4 +1,5 @@
 import {WebRTCStats} from '@peermetrics/webrtc-stats'
+import type {EventEmitter} from 'events'
 
 // import type { RemoveConnectionOptions } from '@peermetrics/webrtc-stats'
 
@@ -7,7 +8,14 @@ import { DEFAULT_OPTIONS, CONSTRAINTS } from "./constants";
 import {ApiWrapper} from './api-wrapper'
 import SdkIntegration from "./sdk_integrations";
 
-import { enableDebug, log, wrapPeerConnection, PeerMetricsError} from './utils'
+import {
+  enableDebug,
+  log,
+  wrapPeerConnection,
+  PeerMetricsError,
+  inferJitsiTransportKind,
+  forEachJitsiPeerConnection
+} from './utils'
 
 import type {
   PeerMetricsConstructor,
@@ -16,14 +24,16 @@ import type {
   SdkIntegrationInterface,
   WebrtcSDKs,
   AddConnectionOptions,
+  AutoDetectConnectionsOptions,
   RemoveConnectionOptions,
   SessionData,
   PageEvents,
   AddEventOptions,
-  PeersToMonitor
+  PeersToMonitor,
+  JitsiParticipantEvent
 } from './types/index'
 
-export {PeerMetricsConstructor, AddConnectionOptions, AddEventOptions}
+export {PeerMetricsConstructor, AddConnectionOptions, AddEventOptions, AutoDetectConnectionsOptions}
 
 /**
  * Used to keep track of peers
@@ -53,11 +63,17 @@ export class PeerMetrics {
 
   private user: User
   private apiWrapper: ApiWrapper
-  private webrtcStats: typeof WebRTCStats
+  private webrtcStats: InstanceType<typeof WebRTCStats>
   private pageEvents: PageEvents
   private _options: PeerMetricsConstructor
   private _initialized: boolean = false
   private webrtcSDK: WebrtcSDKs = ''
+  private _sdkIntegration: InstanceType<typeof SdkIntegration> | null = null
+  // Scoped per connectionId so that the same trackId observed on different PCs
+  // (simulcast, renegotiation, replaceTrack) cannot collide, and so both maps
+  // drain when the connection is removed.
+  private trackCreatePromises: Record<string, Record<string, Promise<void>>> = {}
+  private createdTrackIds: Record<string, Set<string>> = {}
 
   /**
    * Used to initialize the SDK
@@ -250,7 +266,7 @@ export class PeerMetrics {
 
     this.addMediaDeviceChangeListener()
 
-    this._initializeStatsModule(response.getStatsInterval)
+    this._initializeStatsModule(this._options.getStatsInterval || response.getStatsInterval)
   }
 
   /**
@@ -262,13 +278,195 @@ export class PeerMetrics {
       throw new Error('Could not find gloal window. This method should be called in a browser context.')
     }
 
-    peerConnectionEventEmitter = wrapPeerConnection(window)
+    peerConnectionEventEmitter = wrapPeerConnection(window) as EventEmitter | null
     if (!peerConnectionEventEmitter) {
       log('Could not wrap window.RTCPeerConnection')
       return false
     }
 
     return true
+  }
+
+  /**
+   * Automatically detect and add WebRTC connections from common SDK shapes and globals.
+   * By default does not walk the entire `window` object (use `scanBrowserGlobals` to opt in).
+   * @return {Promise<number>} Number of connections successfully added
+   */
+  async autoDetectConnections(options: AutoDetectConnectionsOptions = {}): Promise<number> {
+    if (!this._initialized) {
+      throw new Error('SDK not initialized. Please call initialize() first.')
+    }
+
+    if (!this.webrtcStats) {
+      throw new Error('The stats module is not instantiated yet.')
+    }
+
+    const isSfu = options.isSfu === true
+    const scanBrowserGlobals = options.scanBrowserGlobals === true
+
+    log('Auto-detecting WebRTC connections...')
+    const connections: { pc: RTCPeerConnection; peerId: string; source: string }[] = []
+    const seenPC = new WeakSet<RTCPeerConnection>()
+
+    const pushConnection = (pc: RTCPeerConnection, peerId: string, source: string) => {
+      if (seenPC.has(pc)) return
+      seenPC.add(pc)
+      connections.push({ pc, peerId, source })
+    }
+
+    const searchInObject = (obj: object, path: string, maxDepth: number) => {
+      if (maxDepth <= 0 || !obj || typeof obj !== 'object') return
+
+      try {
+        for (const [key, value] of Object.entries(obj)) {
+          if (value instanceof RTCPeerConnection) {
+            const id = `${path}.${key}`.replace(/^\./, '') || 'detected-connection'
+            pushConnection(value, id, 'global-search')
+            log('Found RTCPeerConnection at:', `${path}.${key}`)
+          } else if (value && typeof value === 'object' && !Array.isArray(value)) {
+            searchInObject(value, `${path}.${key}`, maxDepth - 1)
+          }
+        }
+      } catch {
+        // Ignore access errors (e.g., private properties)
+      }
+    }
+
+    const sdkSearchTargets = [
+      { obj: window.JitsiMeetJS, name: 'JitsiMeetJS' },
+      { obj: window.LiveKit, name: 'LiveKit' },
+      { obj: window.Twilio, name: 'Twilio' },
+      { obj: window.AgoraRTC, name: 'AgoraRTC' }
+    ]
+
+    if (scanBrowserGlobals) {
+      searchInObject(window, 'window', 3)
+    }
+
+    for (const target of sdkSearchTargets) {
+      if (target.obj) {
+        searchInObject(target.obj as object, target.name, 3)
+      }
+    }
+
+    this._searchKnownSDKPatterns(pushConnection)
+
+    let addedCount = 0
+    for (const { pc, peerId, source } of connections) {
+      try {
+        await this.addConnection({
+          pc,
+          peerId,
+          peerName: `Auto-detected (${source})`,
+          ...(isSfu ? { isSfu: true } : {})
+        })
+        addedCount++
+        log('Added auto-detected connection:', peerId)
+      } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : String(error)
+        if (/already monitoring/i.test(msg)) {
+          log('Skipped auto-detected connection (already monitored):', peerId)
+          continue
+        }
+        log('Failed to add auto-detected connection', peerId, msg)
+      }
+    }
+
+    log(`Auto-detection complete: ${addedCount}/${connections.length} connections added`)
+    return addedCount
+  }
+
+  /**
+   * Search for WebRTC connections in known SDK patterns
+   * @private
+   */
+  private _searchKnownSDKPatterns(
+    pushConnection: (pc: RTCPeerConnection, peerId: string, source: string) => void
+  ) {
+    if (window.JitsiMeetJS && window.JitsiMeetJS.app) {
+      try {
+        const app = window.JitsiMeetJS.app
+        if (app._room && app._room.rtc) {
+          this._searchJitsiConnections(app._room.rtc, pushConnection)
+        }
+      } catch {
+        log('Could not access Jitsi room object')
+      }
+    }
+
+    if (window.LiveKit) {
+      try {
+        const rooms = document.querySelectorAll('[data-livekit-room]')
+        rooms.forEach((roomEl, index) => {
+          const room = (roomEl as any).livekitRoom
+          if (room && room.engine) {
+            this._searchLiveKitConnections(room.engine, pushConnection, index)
+          }
+        })
+      } catch {
+        log('Could not access LiveKit room objects')
+      }
+    }
+
+    if (window.Twilio) {
+      try {
+        const searchTwilio = (obj: object, path = '') => {
+          if (obj && typeof obj === 'object') {
+            if ((obj as any)._peerConnections && (obj as any)._peerConnections instanceof Map) {
+              for (const [key, pc] of (obj as any)._peerConnections) {
+                if (pc && pc._peerConnection && pc._peerConnection instanceof RTCPeerConnection) {
+                  pushConnection(pc._peerConnection, `twilio-${path}-${key}`, 'twilio-pattern')
+                }
+              }
+            }
+            Object.entries(obj).forEach(([key, value]) => {
+              if (value && typeof value === 'object' && path.length < 10) {
+                searchTwilio(value, `${path}.${key}`)
+              }
+            })
+          }
+        }
+        searchTwilio(window.Twilio)
+      } catch {
+        log('Could not access Twilio objects')
+      }
+    }
+  }
+
+  private _searchJitsiConnections(
+    rtc: any,
+    pushConnection: (pc: RTCPeerConnection, peerId: string, source: string) => void
+  ) {
+    forEachJitsiPeerConnection(rtc, (pc) => {
+      const kind = inferJitsiTransportKind(pc)
+      const peerId = kind === 'p2p'
+        ? 'jitsi-sfu-server-p2p'
+        : kind === 'jvb'
+          ? 'jitsi-sfu-server-jvb'
+          : 'jitsi-sfu-server'
+      pushConnection(pc, peerId, 'jitsi-pattern')
+    })
+  }
+
+  /**
+   * Search for LiveKit WebRTC connections
+   * @private
+   */
+  private _searchLiveKitConnections(
+    engine: any,
+    pushConnection: (pc: RTCPeerConnection, peerId: string, source: string) => void,
+    roomIndex: number
+  ) {
+    try {
+      if (engine.publisher && engine.publisher.pc) {
+        pushConnection(engine.publisher.pc, `livekit-publisher-${roomIndex}`, 'livekit-pattern')
+      }
+      if (engine.subscriber && engine.subscriber.pc) {
+        pushConnection(engine.subscriber.pc, `livekit-subscriber-${roomIndex}`, 'livekit-pattern')
+      }
+    } catch {
+      log('Could not access LiveKit engine connections')
+    }
   }
 
   /**
@@ -359,8 +557,8 @@ export class PeerMetrics {
     // add the peer to webrtcStats now, so we don't miss any events
     let {connectionId} = await this.webrtcStats.addConnection({peerId, pc})
 
-    // lets not block this function call for this request
-    this._sendAddConnectionRequest({connectionId, options: {pc, peerId, peerName, isSfu}})
+    // Wait for server peer/connection ids so queued timeline events remap before callers continue.
+    await this._sendAddConnectionRequest({connectionId, options: {pc, peerId, peerName, isSfu}})
 
     return {
       connectionId
@@ -399,6 +597,8 @@ export class PeerMetrics {
 
     // cleanup
     delete monitoredConnections[connectionId]
+    delete this.trackCreatePromises[internalId]
+    delete this.createdTrackIds[internalId]
     peer.connections = peer.connections.filter(cId => cId !== internalId)
   }
 
@@ -432,16 +632,42 @@ export class PeerMetrics {
   public async addSdkIntegration(options: SdkIntegrationInterface) {
 
     let sdkIntegration = new SdkIntegration()
+    this._sdkIntegration = sdkIntegration
 
-    sdkIntegration.on('newConnection', (options) => {
-      this.addConnection(options)
+    sdkIntegration.on('newConnection', (opts) => {
+      this.addConnection(opts).catch((e) => log(e))
     })
 
-    // if we have a pion integration, it's safe to wrap the peer connection later
-    if (options.pion) {
-      // if we haven't already wrapped
+    // Jitsi conference-level participant events (opt-in via
+    // `addSdkIntegration({ jitsi: { conference } })`) are forwarded as
+    // regular custom events so the dashboard can render them.
+    sdkIntegration.on('jitsiParticipantEvent', (ev: JitsiParticipantEvent) => {
+      if (!ev || typeof ev !== 'object') {
+        log('Ignoring malformed jitsiParticipantEvent payload.')
+        return
+      }
+
+      // Keep participant events bounded before handing them to addEvent(),
+      // which enforces final serialization limits.
+      const payload: JitsiParticipantEvent = {
+        ...ev,
+        eventName: typeof ev.eventName === 'string' && ev.eventName ? ev.eventName : 'jitsiParticipantEvent'
+      }
+
+      this.addEvent(payload as AddEventOptions).catch((e) => log(e))
+    })
+
+    // if we have a pion or jitsi integration, it's safe to wrap the peer connection later
+    if (options.pion || options.jitsi) {
       if (!peerConnectionEventEmitter) {
-        peerConnectionEventEmitter = wrapPeerConnection(window)
+        peerConnectionEventEmitter = wrapPeerConnection(window) as EventEmitter
+      } else if (options.jitsi) {
+        // lib-jitsi-meet often replaces window.RTCPeerConnection when its bundle loads; chain
+        // our instrumentation outside whatever is currently on `window`.
+        const chained = wrapPeerConnection(window, peerConnectionEventEmitter as EventEmitter)
+        if (chained) {
+          peerConnectionEventEmitter = chained as EventEmitter
+        }
       }
     }
 
@@ -461,6 +687,17 @@ export class PeerMetrics {
     } else {
       throw new Error("We could not find any integration details in the options object that was passed in.")
     }
+  }
+
+  /**
+   * After `addSdkIntegration({ jitsi: { serverId, serverName } })`, attach the live
+   * `JitsiConference` for participant lifecycle events and late PC discovery.
+   */
+  public attachJitsiConference(conference: any): void {
+    if (!this._sdkIntegration) {
+      throw new Error('Call addSdkIntegration with jitsi options before attachJitsiConference().')
+    }
+    this._sdkIntegration.attachJitsiConference(conference)
   }
 
   /**
@@ -629,8 +866,9 @@ export class PeerMetrics {
    * Adds event listener for the stats library
    */
   private _addWebrtcStatsEventListeners () {
-    this.webrtcStats
-      // just listen on the timeline and handle them differently
+    // WebRTCStats extends EventEmitter at runtime, but the upstream package ships
+    // without .d.ts so TS can't see the inherited listener methods here.
+    (this.webrtcStats as unknown as EventEmitter)
       .on('timeline', this._handleTimelineEvent.bind(this))
   }
 
@@ -670,14 +908,22 @@ export class PeerMetrics {
     monitoredConnections[connectionId] = response.connection_id
     peersToMonitor[peerId].connections.push(response.connection_id)
 
-    // all the events that we captured while waiting for 'addConnection' are here
-    // send them to the server
-    eventQueue.map((event) => {
-      this._handleTimelineEvent(event)
-    })
+    // Events captured before server ack are queued; draining may enqueue follow-ups, so loop.
+    let drainRounds = 0
+    const maxDrainRounds = 50
+    while (eventQueue.length > 0 && drainRounds < maxDrainRounds) {
+      drainRounds++
+      const batch = eventQueue.splice(0, eventQueue.length)
+      for (const event of batch) {
+        this._handleTimelineEvent(event)
+      }
+    }
 
-    // clear the queue
-    eventQueue.length = 0
+    if (drainRounds >= maxDrainRounds && eventQueue.length > 0) {
+      log(
+        `drain loop hit max rounds (${maxDrainRounds}); ${eventQueue.length} event(s) still queued — possible dropped events`
+      )
+    }
   }
 
   private _handleTimelineEvent (ev) {
@@ -780,6 +1026,12 @@ export class PeerMetrics {
 
   private _handleTrackEvent (ev) {
     let {data, peerId, connectionId, event} = ev
+    // getUserMedia-attached tracks emit mute/unmute/ended without peerId/connectionId.
+    // Those are PUT /tracks updates; the API only has tracks created via ontrack POST for a
+    // monitored connection — sending PUTs here causes track_not_found.
+    if (event !== 'ontrack' && (!peerId || !connectionId)) {
+      return
+    }
     let dataToSend = {
       event,
       peerId,
@@ -805,6 +1057,52 @@ export class PeerMetrics {
       }
     } else {
       log('Received track event without track')
+    }
+
+    const trackId = dataToSend.trackId
+    if (!trackId) {
+      return
+    }
+
+    const connectionPromises = this.trackCreatePromises[connectionId] || (this.trackCreatePromises[connectionId] = {})
+    const connectionCreated = this.createdTrackIds[connectionId] || (this.createdTrackIds[connectionId] = new Set<string>())
+
+    if (event === 'ontrack') {
+      const createPromise = this.apiWrapper.sendTrackEvent(dataToSend)
+        .then(() => {
+          // The connection may have been removed while the create request was in flight;
+          // only flip the flag if we still own the scoped map.
+          if (this.createdTrackIds[connectionId] === connectionCreated) {
+            connectionCreated.add(trackId)
+          }
+        })
+        .catch((e) => {
+          log('Could not create track:', e && e.message ? e.message : e)
+        })
+        .finally(() => {
+          if (this.trackCreatePromises[connectionId] === connectionPromises) {
+            delete connectionPromises[trackId]
+          }
+        })
+      connectionPromises[trackId] = createPromise
+      return
+    }
+
+    const maybePendingCreate = connectionPromises[trackId]
+    if (maybePendingCreate) {
+      maybePendingCreate
+        .then(() => {
+          if (!connectionCreated.has(trackId)) return
+          return this.apiWrapper.sendTrackEvent(dataToSend)
+        })
+        .catch((e) => {
+          log('Could not send track update:', e && e.message ? e.message : e)
+        })
+      return
+    }
+
+    if (!connectionCreated.has(trackId)) {
+      return
     }
 
     this.apiWrapper.sendTrackEvent(dataToSend)

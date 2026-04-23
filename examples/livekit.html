@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>PeerMetrics SDK - LiveKit Integration</title>
+    <script src="../dist/browser.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        button { padding: 10px 20px; margin: 5px; font-size: 16px; }
+        video { width: 300px; height: 200px; margin: 10px; border: 1px solid #ccc; }
+        .status { padding: 10px; margin: 10px 0; background: #f0f0f0; border-radius: 5px; }
+        .log { background: #000; color: #0f0; padding: 10px; margin: 10px 0; height: 200px; overflow-y: auto; font-family: monospace; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>PeerMetrics SDK - LiveKit Integration</h1>
+        
+        <div class="status" id="status">
+            Status: Not connected
+        </div>
+        
+        <div class="config">
+            <div style="background: #e8f4fd; padding: 15px; margin: 10px 0; border-radius: 8px; border-left: 4px solid #2196F3;">
+                <h3 style="margin: 0 0 10px 0; color: #1976D2;">🚀 Get Free LiveKit Credentials</h3>
+                <p style="margin: 5px 0; color: #424242;">
+                    <strong>Need testing credentials?</strong> Get free access to LiveKit Cloud:
+                </p>
+                <p style="margin: 5px 0;">
+                    <a href="https://cloud.livekit.io" target="_blank" style="color: #1976D2; text-decoration: none; font-weight: bold;">
+                        🌐 cloud.livekit.io
+                    </a> 
+                    - Sign up for free and get your URL & token
+                </p>
+            </div>
+            
+            <div style="margin: 10px 0;">
+                <label for="livekitUrl">LiveKit URL:</label><br>
+                <input type="text" id="livekitUrl" placeholder="wss://your-livekit-server.com" 
+                       value="wss://your-livekit-server.com" style="width: 300px; padding: 5px; margin: 5px 0;">
+            </div>
+            <div style="margin: 10px 0;">
+                <label for="livekitToken">LiveKit Token:</label><br>
+                <input type="text" id="livekitToken" placeholder="your-livekit-token" 
+                       value="your-livekit-token" style="width: 300px; padding: 5px; margin: 5px 0;">
+            </div>
+        </div>
+        
+        <div>
+            <button id="connectBtn">Connect to Room</button>
+            <button id="disconnectBtn" disabled>Disconnect</button>
+            <button id="toggleVideoBtn" disabled>Toggle Video</button>
+            <button id="toggleAudioBtn" disabled>Toggle Audio</button>
+            <button id="openSecondParticipantBtn">Open 2nd participant</button>
+        </div>
+        
+        <div>
+            <video id="localVideo" autoplay muted></video>
+            <video id="remoteVideo" autoplay></video>
+        </div>
+        
+        <div class="log" id="log"></div>
+    </div>
+
+    <script>
+        let peerMetrics = null
+        let room = null
+        let localVideo = null
+        let remoteVideo = null
+        let resolvedConferenceId = ''
+        const observedPeerConnections = new WeakSet()
+        
+        // Initialize video elements immediately
+        function initVideoElements() {
+            localVideo = document.getElementById('localVideo')
+            remoteVideo = document.getElementById('remoteVideo')
+            
+            if (!localVideo) {
+                console.error('localVideo element not found')
+            }
+            if (!remoteVideo) {
+                console.error('remoteVideo element not found')
+            }
+        }
+        
+        // DOM elements
+        const statusEl = document.getElementById('status')
+        const logEl = document.getElementById('log')
+        const connectBtn = document.getElementById('connectBtn')
+        const disconnectBtn = document.getElementById('disconnectBtn')
+        const toggleVideoBtn = document.getElementById('toggleVideoBtn')
+        const toggleAudioBtn = document.getElementById('toggleAudioBtn')
+        const openSecondParticipantBtn = document.getElementById('openSecondParticipantBtn')
+        const livekitUrlEl = document.getElementById('livekitUrl')
+        const livekitTokenEl = document.getElementById('livekitToken')
+        const startupQueryParams = new URLSearchParams(window.location.search)
+
+        function getParticipantIdentity() {
+            const slot = startupQueryParams.get('participant') === '2' ? '2' : '1'
+            const explicitUserId = String(startupQueryParams.get('userId') || '').trim()
+            const userId = explicitUserId || ('livekit-user-' + slot + '-' + Math.random().toString(36).substr(2, 6))
+            const userName = 'LiveKit User #' + slot
+            return { slot, userId, userName }
+        }
+
+        function decodeJwtPayload(token) {
+            try {
+                const parts = String(token || '').split('.')
+                if (parts.length < 2) return null
+                const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/')
+                const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4)
+                return JSON.parse(atob(padded))
+            } catch (_) {
+                return null
+            }
+        }
+
+        function toSafeConferenceSegment(raw) {
+            return String(raw || '').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 48)
+        }
+
+        function resolveConferenceIdFromTokenOrQuery(token) {
+            const payload = decodeJwtPayload(token)
+            const tokenRoom = payload && payload.video && typeof payload.video.room === 'string'
+                ? payload.video.room
+                : ''
+            const roomSegment = toSafeConferenceSegment(tokenRoom)
+            if (roomSegment) return 'livekit-room-' + roomSegment
+
+            const queryConferenceId = toSafeConferenceSegment(startupQueryParams.get('conferenceId'))
+            if (queryConferenceId) return 'livekit-room-' + queryConferenceId
+
+            return 'livekit-room-' + Math.random().toString(36).substr(2, 9)
+        }
+        
+        // Logging function
+        function log(message) {
+            const timestamp = new Date().toLocaleTimeString()
+            logEl.innerHTML += `[${timestamp}] ${message}<br>`
+            logEl.scrollTop = logEl.scrollHeight
+            console.log(message)
+        }
+
+        function attachPcDiagnostics(pc, label) {
+            if (!pc || observedPeerConnections.has(pc)) return
+            observedPeerConnections.add(pc)
+
+            log(`🧪 Attached PC diagnostics: ${label}`)
+            log(`   ↳ initial states: ice=${pc.iceConnectionState}, conn=${pc.connectionState}, signaling=${pc.signalingState}`)
+
+            pc.addEventListener('iceconnectionstatechange', () => {
+                log(`🧊 [${label}] iceConnectionState -> ${pc.iceConnectionState}`)
+            })
+            pc.addEventListener('connectionstatechange', () => {
+                log(`🔌 [${label}] connectionState -> ${pc.connectionState}`)
+            })
+            pc.addEventListener('icegatheringstatechange', () => {
+                log(`📡 [${label}] iceGatheringState -> ${pc.iceGatheringState}`)
+            })
+            pc.addEventListener('signalingstatechange', () => {
+                log(`📨 [${label}] signalingState -> ${pc.signalingState}`)
+            })
+            pc.addEventListener('icecandidate', (event) => {
+                if (event && event.candidate) {
+                    log(`🧾 [${label}] ICE candidate gathered`)
+                } else {
+                    log(`🧾 [${label}] ICE gathering complete`)
+                }
+            })
+        }
+
+        function observeLiveKitPeerConnections() {
+            if (!room || !room.engine) return
+
+            const checks = [
+                { pc: room.engine?.publisher?.pc, label: 'publisher/outbound' },
+                { pc: room.engine?.subscriber?.pc, label: 'subscriber/inbound' },
+                { pc: room.engine?.pcManager?.publisher?.pc, label: 'pcManager publisher/outbound' },
+                { pc: room.engine?.pcManager?.subscriber?.pc, label: 'pcManager subscriber/inbound' },
+                { pc: room.engine?.pcManager?.pc, label: 'pcManager transport' },
+                { pc: room.engine?.transport?.pc, label: 'engine transport' }
+            ]
+
+            checks.forEach(({ pc, label }) => attachPcDiagnostics(pc, label))
+        }
+        
+        // Initialize PeerMetrics
+        async function initPeerMetrics() {
+            try {
+                const identity = getParticipantIdentity()
+                const conferenceId = resolvedConferenceId || resolveConferenceIdFromTokenOrQuery(livekitTokenEl.value.trim())
+                resolvedConferenceId = conferenceId
+                peerMetrics = new PeerMetrics({
+                    apiRoot: 'http://localhost:8081/v1',
+                    apiKey: 'c4d00fa8c1d14c8d9c0dc72a0cab222e',
+                    userId: identity.userId,
+                    userName: identity.userName,
+                    conferenceId: conferenceId,
+                    conferenceName: 'LiveKit Demo Room',
+                    appVersion: '1.0.0',
+                    debug: true,
+                    mockRequests: false
+                })
+                
+                await peerMetrics.initialize()
+                log('✅ PeerMetrics initialized successfully')
+                log('🧩 PeerMetrics conferenceId: ' + conferenceId)
+                
+                // Add LiveKit integration
+                await peerMetrics.addSdkIntegration({
+                    livekit: {
+                        room: room,
+                        serverId: 'livekit-demo-server',
+                        serverName: 'LiveKit Demo Server'
+                    }
+                })
+                
+                log('✅ LiveKit integration added')
+                log('🧭 LiveKit transport peers: outbound (publisher) and inbound (subscriber)')
+                log('📊 PeerMetrics will now monitor:')
+                log('   • WebRTC connection states and ICE candidates')
+                log('   • Audio/Video track statistics (bitrate, jitter, packet loss)')
+                log('   • Network performance metrics (round-trip time, bandwidth)')
+                log('   • getUserMedia events and device information')
+                
+            } catch (error) {
+                log('❌ PeerMetrics initialization failed: ' + error.message)
+            }
+        }
+        
+        // Connect to LiveKit room
+        async function connectToRoom() {
+            try {
+                // Check if LiveKit is loaded
+                if (typeof LivekitClient === 'undefined') {
+                    throw new Error('LiveKit library not loaded. Please refresh the page and try again.')
+                }
+                
+                log('🔄 Connecting to LiveKit room...')
+                statusEl.textContent = 'Status: Connecting...'
+                connectBtn.disabled = true
+                
+                // Create LiveKit room with default configuration
+                room = new LivekitClient.Room({
+                    adaptiveStream: true,
+                    dynacast: true
+                })
+                
+                // Set up event listeners
+                room.on(LivekitClient.RoomEvent.Connected, () => {
+                    log('✅ Connected to LiveKit room')
+                    statusEl.textContent = 'Status: Connected'
+                    disconnectBtn.disabled = false
+                    toggleVideoBtn.disabled = false
+                    toggleAudioBtn.disabled = false
+                    observeLiveKitPeerConnections()
+                    
+                    // Add a small delay to let connections be established
+                    setTimeout(() => {
+                        observeLiveKitPeerConnections()
+                        log('🎯 LiveKit session ready - PeerMetrics monitoring active')
+                    }, 2000)
+                })
+                
+                room.on(LivekitClient.RoomEvent.Disconnected, () => {
+                    log('❌ Disconnected from LiveKit room')
+                    statusEl.textContent = 'Status: Disconnected'
+                    connectBtn.disabled = false
+                    disconnectBtn.disabled = true
+                    toggleVideoBtn.disabled = true
+                    toggleAudioBtn.disabled = true
+                })
+                
+                room.on(LivekitClient.RoomEvent.TrackSubscribed, (track, publication, participant) => {
+                    log(`📺 Track subscribed: ${track.kind} from ${participant.identity}`)
+                    if (track.kind === LivekitClient.Track.Kind.Video) {
+                        try {
+                            if (remoteVideo) {
+                                remoteVideo.srcObject = new MediaStream([track.mediaStreamTrack])
+                                log('📹 Remote video track attached')
+                            } else {
+                                log('⚠️ Remote video element not found')
+                            }
+                        } catch (error) {
+                            log(`⚠️ Could not attach remote video: ${error.message}`)
+                        }
+                    }
+                })
+                
+                room.on(LivekitClient.RoomEvent.TrackUnsubscribed, (track, publication, participant) => {
+                    log(`📺 Track unsubscribed: ${track.kind} from ${participant.identity}`)
+                })
+                
+                room.on(LivekitClient.RoomEvent.ParticipantConnected, (participant) => {
+                    log(`👤 Participant connected: ${participant.identity}`)
+                })
+                
+                room.on(LivekitClient.RoomEvent.ParticipantDisconnected, (participant) => {
+                    log(`👤 Participant disconnected: ${participant.identity}`)
+                })
+                
+                room.on(LivekitClient.RoomEvent.LocalTrackPublished, (publication) => {
+                    if (publication.track.kind === LivekitClient.Track.Kind.Video && localVideo) {
+                        localVideo.srcObject = new MediaStream([publication.track.mediaStreamTrack])
+                    }
+                })
+                
+                room.on(LivekitClient.RoomEvent.LocalTrackUnpublished, (publication) => {
+                    if (publication.track.kind === LivekitClient.Track.Kind.Video && localVideo) {
+                        localVideo.srcObject = null
+                    }
+                })
+                
+                // Get URL and token from input fields
+                const livekitUrl = livekitUrlEl.value.trim()
+                const livekitToken = livekitTokenEl.value.trim()
+                
+                if (!livekitUrl || livekitUrl === 'wss://your-livekit-server.com') {
+                    throw new Error('Please enter a valid LiveKit URL')
+                }
+                
+                if (!livekitToken || livekitToken === 'your-livekit-token') {
+                    throw new Error('Please enter a valid LiveKit token')
+                }
+                resolvedConferenceId = resolveConferenceIdFromTokenOrQuery(livekitToken)
+                
+                log(`🔗 Connecting to: ${livekitUrl}`)
+                log(`🔑 Using token: ${livekitToken.substring(0, 20)}...`)
+
+                // Initialize PeerMetrics before room.connect so early transport/ICE lifecycle
+                // events are observed (otherwise initial state transitions can be missed).
+                await initPeerMetrics()
+                
+                // Connect to room with better error handling
+                try {
+                    await room.connect(livekitUrl, livekitToken)
+                    log('✅ Successfully connected to LiveKit room')
+                    setTimeout(observeLiveKitPeerConnections, 150)
+                    setTimeout(observeLiveKitPeerConnections, 600)
+                    setTimeout(observeLiveKitPeerConnections, 1500)
+                } catch (connectError) {
+                    log(`❌ LiveKit connection failed: ${connectError.message}`)
+                    throw connectError
+                }
+                
+                // Enable camera and microphone
+                await room.localParticipant.enableCameraAndMicrophone()
+                log('📹 Camera and microphone enabled')
+                
+                // Video tracks will be handled by the LocalTrackPublished event
+                log('📹 Video tracks will be attached automatically when published')
+                
+                // Try to manually detect LiveKit connections as a fallback
+                setTimeout(async () => {
+                    try {
+                        log('🔍 Attempting to manually detect LiveKit WebRTC connections...')
+                        const connectionsFound = await peerMetrics.autoDetectConnections({ isSfu: true })
+                        if (connectionsFound > 0) {
+                            log(`✅ Auto-detected ${connectionsFound} additional WebRTC connections`)
+                        } else {
+                            log('ℹ️ No additional connections found via auto-detection')
+                        }
+                    } catch (error) {
+                        log(`⚠️ Auto-detection failed: ${error.message}`)
+                    }
+                }, 3000) // Wait 3 seconds for connections to be established
+                
+            } catch (error) {
+                log('❌ Failed to connect to LiveKit: ' + error.message)
+                statusEl.textContent = 'Status: Connection failed'
+                connectBtn.disabled = false
+                if (room) {
+                    try {
+                        await room.disconnect()
+                    } catch (_) { /* ignore */ }
+                    room = null
+                }
+                if (peerMetrics) {
+                    try {
+                        await peerMetrics.endCall()
+                        log('📴 PeerMetrics endCall after failed connect')
+                    } catch (_) { /* ignore */ }
+                    peerMetrics = null
+                }
+            }
+        }
+        
+        // Disconnect from room
+        async function disconnectFromRoom() {
+            if (!room) {
+                log('⚠️ No active room to disconnect')
+                return
+            }
+            try {
+                log('🔄 Disconnecting from LiveKit room...')
+                await room.disconnect()
+                log('✅ Disconnected from LiveKit room')
+            } catch (error) {
+                log('❌ Error disconnecting: ' + error.message)
+            } finally {
+                room = null
+                // LiveKit teardown alone does not stop PeerMetrics / webrtc-stats or tell the
+                // backend the session ended — same pattern as basic-webrtc Hang Up.
+                if (peerMetrics) {
+                    try {
+                        await peerMetrics.endCall()
+                        log('📴 PeerMetrics endCall: WebRTC stats stopped and session closed with backend')
+                    } catch (e) {
+                        log('⚠️ PeerMetrics endCall failed: ' + (e && e.message ? e.message : e))
+                    }
+                    peerMetrics = null
+                }
+            }
+        }
+        
+        // Toggle video
+        async function toggleVideo() {
+            try {
+                const videoEnabled = room.localParticipant.isCameraEnabled
+                if (videoEnabled) {
+                    await room.localParticipant.setCameraEnabled(false)
+                    log('📹 Video disabled')
+                } else {
+                    // Re-enable camera
+                    await room.localParticipant.setCameraEnabled(true)
+                    log('📹 Video enabled')
+                    
+                    // Try to reattach video
+                    const tryReattach = () => {
+                        try {
+                            // Try publications first (most reliable)
+                            if (room?.localParticipant?.videoTrackPublications?.size > 0) {
+                                const videoPub = Array.from(room.localParticipant.videoTrackPublications.values())[0]
+                                if (videoPub.track && localVideo) {
+                                    localVideo.srcObject = new MediaStream([videoPub.track.mediaStreamTrack])
+                                    log('📹 Video reattached')
+                                    return true
+                                }
+                            }
+                            
+                            // Fallback to videoTracks
+                            if (room?.localParticipant?.videoTracks?.size > 0) {
+                                const localTrack = Array.from(room.localParticipant.videoTracks.values())[0]
+                                if (localVideo && localTrack.mediaStreamTrack) {
+                                    localVideo.srcObject = new MediaStream([localTrack.mediaStreamTrack])
+                                    log('📹 Video reattached')
+                                    return true
+                                }
+                            }
+                        } catch (error) {
+                            log('⚠️ Video reattachment failed: ' + error.message)
+                        }
+                    }
+                    
+                    // Try to reattach video
+                    tryReattach()
+                }
+            } catch (error) {
+                log('❌ Error toggling video: ' + error.message)
+            }
+        }
+        
+        // Toggle audio
+        async function toggleAudio() {
+            try {
+                const audioEnabled = room.localParticipant.isMicrophoneEnabled
+                if (audioEnabled) {
+                    await room.localParticipant.setMicrophoneEnabled(false)
+                    log('🎤 Audio disabled')
+                } else {
+                    await room.localParticipant.setMicrophoneEnabled(true)
+                    log('🎤 Audio enabled')
+                }
+            } catch (error) {
+                log('❌ Error toggling audio: ' + error.message)
+            }
+        }
+
+        function openSecondParticipantTab() {
+            const livekitUrl = livekitUrlEl.value.trim()
+            const url = new URL(window.location.href)
+            url.searchParams.set('participant', '2')
+            url.searchParams.set('userId', 'livekit-user-2-' + Date.now().toString(36))
+            if (resolvedConferenceId) {
+                url.searchParams.set('conferenceId', resolvedConferenceId.replace(/^livekit-room-/, ''))
+            }
+            if (livekitUrl) url.searchParams.set('livekitUrl', livekitUrl)
+            window.open(url.toString(), '_blank', 'noopener,noreferrer')
+            log('🪟 Opened second participant tab (URL prefilled, no auto-connect).')
+            log('ℹ️ LiveKit token is identity-bound: use a distinct token in tab 2 to avoid disconnecting tab 1.')
+        }
+        
+        // Event listeners
+        connectBtn.addEventListener('click', connectToRoom)
+        disconnectBtn.addEventListener('click', disconnectFromRoom)
+        toggleVideoBtn.addEventListener('click', toggleVideo)
+        toggleAudioBtn.addEventListener('click', toggleAudio)
+        openSecondParticipantBtn.addEventListener('click', openSecondParticipantTab)
+        
+        // Initialize when page is fully loaded
+        function initialize() {
+            // Initialize video elements first
+            initVideoElements()
+            const identity = getParticipantIdentity()
+            const qpUrl = String(startupQueryParams.get('livekitUrl') || '').trim()
+            if (qpUrl) livekitUrlEl.value = qpUrl
+            
+            log('🚀 LiveKit integration example loaded')
+            log('🪪 Local participant: ' + identity.userName + ' (' + identity.userId + ')')
+            
+            // Check if LiveKit is loaded with retry mechanism
+            let retryCount = 0
+            const maxRetries = 20 // 10 seconds max
+            
+            function checkLiveKit() {
+                if (typeof LivekitClient === 'undefined') {
+                    if (retryCount < maxRetries) {
+                        retryCount++
+                        if (retryCount % 4 === 0) { // Log every 2 seconds
+                            log(`⏳ Waiting for LiveKit library to load... (${retryCount}/${maxRetries})`)
+                        }
+                        setTimeout(checkLiveKit, 500) // Retry every 500ms
+                    } else {
+                        log('❌ LiveKit library failed to load after 10 seconds.')
+                        connectBtn.disabled = true
+                    }
+                } else {
+                    log('✅ LiveKit library loaded successfully')
+                    log('📝 Note: Enter your LiveKit URL and token in the form above to test with real LiveKit server')
+                    log('🔧 This example uses mockRequests: false (real API) unless you change initPeerMetrics')
+                    connectBtn.disabled = false
+                }
+            }
+            
+            checkLiveKit()
+
+            if (startupQueryParams.get('autojoin') === '1') {
+                setTimeout(() => {
+                    void connectToRoom()
+                }, startupQueryParams.get('participant') === '2' ? 600 : 300)
+                log('🤖 Auto-connect requested by URL parameters.')
+            }
+        }
+        
+        // Wait for page to load completely
+        if (document.readyState === 'loading') {
+            window.addEventListener('load', initialize)
+        } else {
+            initialize()
+        }
+    </script>
+</body>
+</html>

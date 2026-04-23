@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>PeerMetrics SDK Examples</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            margin: 0; 
+            padding: 20px; 
+            background: #f5f5f5; 
+        }
+        .container { 
+            max-width: 1200px; 
+            margin: 0 auto; 
+            background: white; 
+            padding: 30px; 
+            border-radius: 10px; 
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1); 
+        }
+        h1 { 
+            color: #333; 
+            text-align: center; 
+            margin-bottom: 30px; 
+        }
+        .examples-grid { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); 
+            gap: 20px; 
+            margin: 30px 0; 
+        }
+        .example-card { 
+            border: 1px solid #ddd; 
+            border-radius: 8px; 
+            padding: 20px; 
+            background: #fafafa; 
+            transition: transform 0.2s, box-shadow 0.2s; 
+        }
+        .example-card:hover { 
+            transform: translateY(-2px); 
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1); 
+        }
+        .example-card h3 { 
+            color: #2c3e50; 
+            margin-top: 0; 
+        }
+        .example-card p { 
+            color: #666; 
+            line-height: 1.5; 
+        }
+        .example-card a { 
+            display: inline-block; 
+            background: #3498db; 
+            color: white; 
+            padding: 10px 20px; 
+            text-decoration: none; 
+            border-radius: 5px; 
+            margin-top: 15px; 
+            transition: background 0.2s; 
+        }
+        .example-card a:hover { 
+            background: #2980b9; 
+        }
+        .features { 
+            background: #ecf0f1; 
+            padding: 20px; 
+            border-radius: 8px; 
+            margin: 30px 0; 
+        }
+        .features h2 { 
+            color: #2c3e50; 
+            margin-top: 0; 
+        }
+        .features ul { 
+            list-style: none; 
+            padding: 0; 
+        }
+        .features li { 
+            padding: 5px 0; 
+            color: #555; 
+        }
+        .features li:before { 
+            content: "✅ "; 
+            margin-right: 8px; 
+        }
+        .code-example { 
+            background: #2c3e50; 
+            color: #ecf0f1; 
+            padding: 15px; 
+            border-radius: 5px; 
+            font-family: 'Courier New', monospace; 
+            margin: 20px 0; 
+            overflow-x: auto; 
+        }
+        .badge { 
+            display: inline-block; 
+            background: #e74c3c; 
+            color: white; 
+            padding: 2px 8px; 
+            border-radius: 3px; 
+            font-size: 12px; 
+            margin-left: 10px; 
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>PeerMetrics SDK Examples</h1>
+        
+        <p style="text-align: center; color: #666; font-size: 18px;">
+            Comprehensive examples showing how to integrate PeerMetrics SDK with various WebRTC platforms
+        </p>
+        
+        <div class="examples-grid">
+            <div class="example-card">
+                <h3>Basic WebRTC <span class="badge">Core</span></h3>
+                <p>
+                    Simple peer-to-peer WebRTC connection with PeerMetrics integration. 
+                    Perfect for understanding the basic SDK usage and WebRTC stats collection.
+                </p>
+                <a href="basic-webrtc.html">View Example</a>
+            </div>
+            
+            <div class="example-card">
+                <h3>LiveKit Integration</h3>
+                <p>
+                    Complete LiveKit SFU integration with automatic connection monitoring. 
+                    Shows how to use PeerMetrics with modern WebRTC SFU solutions.
+                </p>
+                <a href="livekit.html">View Example</a>
+            </div>
+            
+            <div class="example-card">
+                <h3>Jitsi Meet Integration</h3>
+                <p>
+                    Jitsi Meet integration using RTCPeerConnection wrapping. 
+                    Demonstrates how to monitor existing WebRTC applications.
+                </p>
+                <a href="jitsi.html">View Example</a>
+            </div>
+        </div>
+        
+        <div class="features">
+            <h2>What You'll Learn</h2>
+            <ul>
+                <li>How to initialize PeerMetrics SDK</li>
+                <li>Basic WebRTC connection monitoring</li>
+                <li>SDK integration patterns for different platforms</li>
+                <li>Real-time stats collection and analytics</li>
+                <li>Custom event tracking and user actions</li>
+                <li>Debug and monitoring techniques</li>
+            </ul>
+        </div>
+        
+        <div class="code-example">
+// Basic PeerMetrics setup
+const peerMetrics = new PeerMetrics({
+    apiKey: 'your-api-key',
+    userId: 'user-123',
+    conferenceId: 'conference-1',
+    debug: true,
+    mockRequests: true  // For testing
+})
+
+await peerMetrics.initialize()
+        </div>
+        
+        <div style="text-align: center; margin-top: 30px; color: #666;">
+            <p>
+                <strong>Note:</strong> All examples use <code>mockRequests: true</code> for testing purposes. 
+                In production, remove this parameter to send data to the real PeerMetrics API.
+            </p>
+            <p>
+                <strong>Documentation:</strong> 
+                <a href="../docs/" style="color: #3498db;">View complete documentation</a>
+            </p>
+        </div>
+    </div>
+</body>
+</html>

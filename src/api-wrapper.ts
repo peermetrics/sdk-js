@@ -4,9 +4,9 @@ import {log} from './utils'
 
 import type {User} from './user'
 import type { ApiInitializeData, MakeRequest, ConnectionEventData, SessionData } from './types'
-import type {Wretcher} from 'wretch'
+import type {Wretch} from 'wretch'
 
-let externalApi: Wretcher
+let externalApi: Wretch
 
 let token = ''
 let start = 0
@@ -20,6 +20,21 @@ const REQUEST_TIMEOUT = 10 * 1000
 
 const EXPONENTIAL_BACKOFF = 500
 const MAX_EXPONENTIAL_BACKOFF = 60 * 1000
+
+function withTimeout<T> (promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null
+  const timeoutPromise = new Promise<T>((_, reject) => {
+    timeoutId = globalThis.setTimeout(() => {
+      reject(new Error('request timeout'))
+    }, timeoutMs)
+  })
+
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timeoutId !== null) {
+      globalThis.clearTimeout(timeoutId)
+    }
+  })
+}
 
 const UNRECOVERABLE_ERRORS = [
   'domain_not_allowed',
@@ -86,7 +101,7 @@ export class ApiWrapper {
    * initialiaze the session
    * @return {Promise} The fetch promise
    */
-  async initialize (data: ApiInitializeData): Promise<Response> {
+  async initialize (data: ApiInitializeData): Promise<any> {
     let toSend = {...data} as any
 
     // add the user details
@@ -100,7 +115,7 @@ export class ApiWrapper {
       path: '/initialize',
       // @ts-ignore
       data: toSend
-    }).then((response) => {
+    }).then((response: any) => {
       if (response) {
         if (response.urls) {
           // update the urls map with the response from server
@@ -188,7 +203,10 @@ export class ApiWrapper {
   }
 
   sendConnectionEvent (data: ConnectionEventData) {
-    if (this.batchConnectionEvents === false) {
+    // Batching queues events and previously returned `undefined`, but `PeerMetrics.addConnection`
+    // awaits this call and requires the JSON body (`peer_id`, `connection_id`). Always send
+    // addConnection immediately.
+    if (this.batchConnectionEvents === false || data.eventName === 'addConnection') {
       return this._sendConnectionEvent(data)
     }
 
@@ -317,7 +335,7 @@ export class ApiWrapper {
     })
   }
 
-  private async makeRequest (options: MakeRequest) {
+  private async makeRequest (options: MakeRequest): Promise<any> {
     // we just need the path, the base url is set at initialization
     let {path, timestamp, data, retry = false} = options
 
@@ -340,7 +358,9 @@ export class ApiWrapper {
         if (data.eventName === 'addConnection') {
           response = {
             // @ts-ignore
-            peer_id: data.peerId
+            peer_id: data.peerId,
+            // Local mock must mirror server fields awaited by PeerMetrics.addConnection().
+            connection_id: 'mock-connection-id'
           }
         }
         // mock a request that takes anywhere between 0 and 1000ms
@@ -377,9 +397,10 @@ export class ApiWrapper {
       requestToMake = request.post(toSend)
     }
 
-    return requestToMake
-      .setTimeout(REQUEST_TIMEOUT)
-      .json(this._handleResponse)
+    return withTimeout(
+      requestToMake.json(this._handleResponse),
+      REQUEST_TIMEOUT
+    )
       .catch((response) => {
         // if we should retry the request
         if (retry) {

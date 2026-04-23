@@ -1,0 +1,1144 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>PeerMetrics SDK - Jitsi Meet SDK Integration</title>
+    <!-- PeerMetrics SDK (local build) -->
+    <script src="../dist/browser.js"></script>
+    <!-- lib-jitsi-meet and its config.js are loaded dynamically from the "Jitsi base URL" below so the example can
+         point at ANY Jitsi deployment (meet.jit.si, self-hosted, JaaS, etc.). -->
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .container { max-width: 1000px; margin: 0 auto; }
+        button { padding: 10px 20px; margin: 5px; font-size: 16px; }
+        .status { padding: 10px; margin: 10px 0; background: #f0f0f0; border-radius: 5px; }
+        .log { background: #000; color: #0f0; padding: 10px; margin: 10px 0; height: 200px; overflow-y: auto; font-family: monospace; }
+        .jitsi-container { width: 100%; min-height: 220px; margin: 20px 0; border: 1px solid #ccc; padding: 10px; }
+        .jitsi-media { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+        .jitsi-media video { max-width: 360px; max-height: 240px; background: #111; border-radius: 6px; }
+        /* Remote tiles: block-level so multiple tracks stack (inline <video> would sit side-by-side as “black + live”). */
+        #remoteVideos { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+        #remoteVideos video,
+        #remoteVideos audio { display: block; max-width: 360px; width: 100%; }
+        .jitsi-media label { display: block; font-size: 12px; color: #666; margin-bottom: 4px; }
+        .controls { margin: 10px 0; }
+        .info-box { background: #e8f4fd; padding: 15px; margin: 10px 0; border-radius: 8px; border-left: 4px solid #2196F3; }
+        .server-box { background: #fafafa; padding: 12px 14px; margin: 10px 0; border: 1px solid #e0e0e0; border-radius: 6px; }
+        .server-box label { display: block; font-size: 12px; color: #555; margin: 8px 0 2px; }
+        .server-box input { width: 100%; box-sizing: border-box; padding: 8px; font-family: monospace; font-size: 13px; }
+        .server-box summary { cursor: pointer; font-weight: bold; color: #1976D2; }
+        .server-box .row { display: flex; gap: 12px; flex-wrap: wrap; }
+        .server-box .row > div { flex: 1 1 260px; min-width: 0; }
+        .mode-hint { margin-top: 8px; font-size: 12px; color: #555; background: #f3f7ff; border: 1px solid #d9e7ff; border-radius: 6px; padding: 8px 10px; }
+        .metrics-capability { margin-top: 8px; font-size: 12px; border-radius: 999px; display: inline-block; padding: 4px 10px; border: 1px solid #cfd8dc; background: #f5f5f5; color: #37474f; }
+        .metrics-capability.full { background: #e8f5e9; border-color: #a5d6a7; color: #1b5e20; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>PeerMetrics SDK - Jitsi Meet SDK Integration</h1>
+        
+        <div class="info-box">
+            <h3 style="margin: 0 0 10px 0; color: #1976D2;">🚀 Jitsi Meet SDK Integration</h3>
+            <p style="margin: 5px 0; color: #424242;">
+                <strong>Full WebRTC monitoring:</strong> This example uses the Jitsi Meet SDK (not External API) for direct access to RTCPeerConnection objects.
+            </p>
+            <p style="margin: 5px 0; font-size: 14px; color: #666;">
+                • Direct access to WebRTC connections and stats<br>
+                • Complete ICE connection monitoring<br>
+                • Packet loss, jitter, and bitrate tracking<br>
+                • Real-time network performance metrics<br>
+                <strong>Label hint:</strong> Throughput can show multiple series per participant (audio/video and inbound/outbound). Transport peers may appear as <code>... (P2P)</code> or <code>... (JVB/SFU)</code>.<br>
+                <strong>Note:</strong> Room names must be lowercase and alphanumeric only<br>
+                <strong>Note:</strong> <code>config.js</code> loads in <code>&lt;head&gt;</code> before lib-jitsi-meet. After updating this file, use a <strong>hard refresh</strong> (Ctrl+Shift+R) so the browser does not run an old cached page (old builds used BOSH as <code>serviceUrl</code> and show generic error hints).<br>
+                <strong>Note:</strong> For production, use your own Jitsi deployment and its <code>config.js</code>.<br>
+                <strong>Note:</strong> On <strong>meet.jit.si</strong>, <code>CONFERENCE_FAILED: …membersOnly</code> is common: the service expects meetings to be created in the official web client (often with sign-in), and some rooms are lobby- or members-only. Use a fresh random room name, open the same room once in a browser as moderator, or <strong>point this example at your own Jitsi server</strong> below.
+            </p>
+        </div>
+
+        <div class="server-box">
+            <label for="deploymentMode">Deployment mode</label>
+            <select id="deploymentMode" style="width: 100%; box-sizing: border-box; padding: 8px; font-family: monospace; font-size: 13px;">
+                <option value="own">A) Own setup (self-hosted/custom)</option>
+                <option value="jaas">B) JaaS (8x8.vc + App ID + JWT)</option>
+            </select>
+            <label for="forceP2P" style="display: inline-flex; align-items: center; gap: 8px; margin-top: 8px; cursor: pointer;">
+                <input type="checkbox" id="forceP2P">
+                Force P2P (1:1 preference; not used for group calls)
+            </label>
+            <div id="deploymentModeHint" class="mode-hint"></div>
+            <div id="metricsCapability" class="metrics-capability"></div>
+            <label for="jitsiBaseUrl">Jitsi base URL (server root that serves <code>/config.js</code> and <code>/libs/lib-jitsi-meet.min.js</code>)</label>
+            <input type="url" id="jitsiBaseUrl" placeholder="https://meet.jit.si" value="https://meet.jit.si">
+            <details style="margin-top: 8px;">
+                <summary>Advanced overrides (optional)</summary>
+                <div class="row" style="margin-top: 8px;">
+                    <div>
+                        <label for="jitsiConfigUrl">Custom <code>config.js</code> URL (default: <code>&lt;base&gt;/config.js</code>)</label>
+                        <input type="url" id="jitsiConfigUrl" placeholder="https://meet.jit.si/config.js">
+                    </div>
+                    <div>
+                        <label for="jitsiLibUrl">Custom <code>lib-jitsi-meet.min.js</code> URL (default: <code>&lt;base&gt;/libs/lib-jitsi-meet.min.js</code>)</label>
+                        <input type="url" id="jitsiLibUrl" placeholder="https://meet.jit.si/libs/lib-jitsi-meet.min.js">
+                    </div>
+                </div>
+                <label for="jitsiJwtToken">JWT token (optional, required for many hosted/JaaS deployments)</label>
+                <input type="text" id="jitsiJwtToken" placeholder="eyJhbGciOi...">
+                <label for="jitsiAppId">App ID (optional, used by JaaS/8x8.vc)</label>
+                <input type="text" id="jitsiAppId" placeholder="vpaas-magic-cookie-...">
+                <p style="font-size: 12px; color: #666; margin: 8px 0 0;">
+                    These are handy for JaaS (<code>8x8.vc</code>) or self-hosted deployments where the config/lib are served from a different path.
+                </p>
+            </details>
+            <button type="button" id="resetServerBtn" style="margin-top: 8px;">Reset to meet.jit.si</button>
+        </div>
+
+        <div class="status" id="status">
+            Status: Not connected
+        </div>
+        
+        <div class="controls">
+            <input type="text" id="roomName" placeholder="Enter room name (lowercase, alphanumeric only)" value="peermetricsdemo" style="padding: 8px; margin: 5px;">
+            <button type="button" id="randomRoomBtn" title="Avoid reused / restricted room names on meet.jit.si">Random room</button>
+            <button id="joinBtn">Join Room</button>
+            <button id="leaveBtn" disabled>Leave Room</button>
+            <button id="toggleVideoBtn" disabled>Toggle Video</button>
+            <button id="toggleAudioBtn" disabled>Toggle Audio</button>
+            <button id="openSecondParticipantBtn" title="Open a second participant in a new tab (JaaS mode)">Open 2nd participant</button>
+        </div>
+        
+        <div class="jitsi-container" id="jitsiContainer">
+            <div class="jitsi-media">
+                <div>
+                    <label for="localVideo">Local</label>
+                    <video id="localVideo" autoplay muted playsinline></video>
+                </div>
+                <div>
+                    <label>Remote</label>
+                    <div id="remoteVideos"></div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="log" id="log"></div>
+    </div>
+
+    <script>
+        let peerMetrics = null
+        let room = null
+        let currentConnection = null
+        let isVideoEnabled = true
+        let isAudioEnabled = true
+        const MAX_RECONNECTS = 3
+        let reconnectCount = 0
+        let reconnectingForShard = false
+        let lastConferenceFailureWasPolicyBlock = false
+        /** @type {any[]} */
+        let localTracks = []
+        /** Map each remote Jitsi track object to the DOM node we created (cleanup on TRACK_REMOVED). */
+        const remoteTrackMediaElements = new WeakMap()
+        /** @type {ReturnType<typeof setTimeout> | null} */
+        let joinHangWatchdog = null
+        const EXAMPLE_BUILD_ID = 'jitsi-example-2026-04-11a'
+        /** @see jitsi/lib-jitsi-meet JitsiConferenceErrors.MEMBERS_ONLY_ERROR */
+        const JITSI_MEMBERS_ONLY_ERROR = 'conference.connectionError.membersOnly'
+        const DEFAULT_JITSI_BASE_URL = 'https://meet.jit.si'
+        const LS_PREFIX = 'pmJitsiExample.'
+        
+        // DOM elements
+        const statusEl = document.getElementById('status')
+        const logEl = document.getElementById('log')
+        const randomRoomBtn = document.getElementById('randomRoomBtn')
+        const joinBtn = document.getElementById('joinBtn')
+        const leaveBtn = document.getElementById('leaveBtn')
+        const toggleVideoBtn = document.getElementById('toggleVideoBtn')
+        const toggleAudioBtn = document.getElementById('toggleAudioBtn')
+        const openSecondParticipantBtn = document.getElementById('openSecondParticipantBtn')
+        const roomNameEl = document.getElementById('roomName')
+        const localVideoEl = document.getElementById('localVideo')
+        const remoteVideosEl = document.getElementById('remoteVideos')
+        const jitsiBaseUrlEl = document.getElementById('jitsiBaseUrl')
+        const jitsiConfigUrlEl = document.getElementById('jitsiConfigUrl')
+        const jitsiLibUrlEl = document.getElementById('jitsiLibUrl')
+        const jitsiJwtTokenEl = document.getElementById('jitsiJwtToken')
+        const jitsiAppIdEl = document.getElementById('jitsiAppId')
+        const deploymentModeEl = document.getElementById('deploymentMode')
+        const forceP2PEl = document.getElementById('forceP2P')
+        const deploymentModeHintEl = document.getElementById('deploymentModeHint')
+        const metricsCapabilityEl = document.getElementById('metricsCapability')
+        const resetServerBtn = document.getElementById('resetServerBtn')
+        const startupQueryParams = new URLSearchParams(window.location.search)
+
+        /** Remember the last-loaded lib URL so we only reload the script when it actually changes. */
+        let loadedJitsiLibUrl = null
+
+        function normalizeParticipantUserId(raw, fallbackPrefix) {
+            const cleaned = String(raw || '').trim().replace(/[^a-zA-Z0-9_-]/g, '')
+            if (cleaned) return cleaned
+            return fallbackPrefix + '-' + Math.random().toString(36).slice(2, 8)
+        }
+
+        function getParticipantIdentity() {
+            const slot = startupQueryParams.get('participant') === '2' ? '2' : '1'
+            const fallbackPrefix = slot === '2' ? 'pm-user-2' : 'pm-user-1'
+            const userId = normalizeParticipantUserId(startupQueryParams.get('userId'), fallbackPrefix)
+            const displayName = 'PeerMetrics demo user #' + slot + ' (' + userId + ')'
+            return { slot, userId, displayName }
+        }
+
+        function disposeLocalTracks() {
+            localTracks.forEach((t) => {
+                try { t.dispose() } catch (_) {}
+            })
+            localTracks = []
+        }
+
+        function clearRemoteMedia() {
+            remoteVideosEl.innerHTML = ''
+        }
+
+        function clearJoinHangWatchdog() {
+            if (joinHangWatchdog) {
+                clearTimeout(joinHangWatchdog)
+                joinHangWatchdog = null
+            }
+        }
+
+        function appendURLParam(url, key, value) {
+            if (!url) return url
+            const sep = url.indexOf('?') === -1 ? '?' : '&'
+            return url + sep + encodeURIComponent(key) + '=' + encodeURIComponent(value == null ? '' : String(value))
+        }
+
+        function stringifyErrorDetails(err) {
+            if (err == null) return ''
+            if (typeof err === 'string') return err
+            try {
+                return JSON.stringify(err)
+            } catch (_) {
+                return String(err)
+            }
+        }
+
+        function decodeJwtPayload(token) {
+            try {
+                const parts = String(token || '').split('.')
+                if (parts.length < 2) return null
+                const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/')
+                const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4)
+                return JSON.parse(atob(padded))
+            } catch (_) {
+                return null
+            }
+        }
+
+        function inspectJaasTokenClaims(jwtToken, appId, fullRoomName) {
+            const payload = decodeJwtPayload(jwtToken)
+            if (!payload) {
+                log('⚠️ Could not decode JWT payload in browser (format invalid?).')
+                return
+            }
+            const now = Math.floor(Date.now() / 1000)
+            const exp = Number(payload.exp || 0)
+            const roomClaim = payload.room
+            log('🪪 JWT claims: iss=' + (payload.iss || '(missing)') + ', aud=' + (payload.aud || '(missing)') + ', sub=' + (payload.sub || '(missing)') + ', room=' + (roomClaim || '(missing)'))
+            if (exp) {
+                log('⏱️ JWT exp: ' + new Date(exp * 1000).toISOString() + (exp < now ? ' (EXPIRED)' : ''))
+            } else {
+                log('⚠️ JWT exp claim missing.')
+            }
+            if (payload.sub && String(payload.sub) !== '8x8.vc') {
+                log('⚠️ JWT sub is "' + payload.sub + '" (JaaS usually expects "8x8.vc").')
+            }
+            if (roomClaim && roomClaim !== '*' && roomClaim !== fullRoomName) {
+                log('⚠️ JWT room claim "' + roomClaim + '" does not match effective room "' + fullRoomName + '".')
+            }
+            if (appId && payload.context && payload.context.features) {
+                log('ℹ️ JWT context.features present.')
+            }
+        }
+
+        /** Pass through meet.jit.si config fields the conference expects (p2p, videoQuality, etc.). */
+        function buildConferenceConfigFromDeployment(deployment) {
+            const c = { openBridgeChannel: true }
+            const keys = [
+                'p2p', 'videoQuality', 'channelLastN', 'startAudioMuted', 'startVideoMuted',
+                'enableLayerSuspension', 'disableSimulcast', 'useTurnUdp', 'deploymentInfo',
+                'enableNoAudioDetection', 'enableNoisyMicDetection', 'enableTalkWhileMuted',
+                'e2eping', 'disableAudioLevels', 'enableRemb', 'enableTcc', 'disableRtx',
+                'avgRtpStatsN', 'pcStatsInterval', 'startSilent', 'hiddenDomain', 'analytics', 'testing'
+            ]
+            for (const k of keys) {
+                if (deployment[k] !== undefined) c[k] = deployment[k]
+            }
+            if (c.testing && typeof c.testing === 'object') {
+                c.testing = Object.assign({}, c.testing)
+                delete c.testing.enableGracefulReconnect
+            }
+            if (forceP2PEl && forceP2PEl.checked) {
+                const p2pConfig = (c.p2p && typeof c.p2p === 'object') ? c.p2p : {}
+                c.p2p = Object.assign({}, p2pConfig, { enabled: true })
+            }
+            return c
+        }
+
+        function normalizeBaseUrl(u) {
+            const raw = String(u || '').trim()
+            if (!raw) return ''
+            return raw.replace(/\/+$/, '')
+        }
+
+        /** Compute the URLs to load given the form inputs (falling back to <base>/config.js etc.). */
+        function getJitsiUrls() {
+            const base = normalizeBaseUrl(jitsiBaseUrlEl.value) || DEFAULT_JITSI_BASE_URL
+            const mode = getEffectiveDeploymentMode()
+            const appId = String(jitsiAppIdEl.value || '').trim()
+            const cfgOverride = String(jitsiConfigUrlEl.value || '').trim()
+            const libOverride = String(jitsiLibUrlEl.value || '').trim()
+            const useJaasScopedDefaults = mode === 'jaas' && !!appId
+            const defaultConfigUrl = useJaasScopedDefaults ? (base + '/' + encodeURIComponent(appId) + '/config.js') : (base + '/config.js')
+            const defaultLibUrl = useJaasScopedDefaults ? (base + '/' + encodeURIComponent(appId) + '/libs/lib-jitsi-meet.min.js') : (base + '/libs/lib-jitsi-meet.min.js')
+            const configUrl = cfgOverride || defaultConfigUrl
+            const libUrl = libOverride || defaultLibUrl
+            return { base, configUrl, libUrl }
+        }
+
+        /** Ensure lib-jitsi-meet from `libUrl` is loaded (once per URL). Re-evaluating the script reuses its globals. */
+        function ensureJitsiLibLoaded(libUrl) {
+            if (typeof JitsiMeetJS !== 'undefined' && loadedJitsiLibUrl === libUrl) {
+                return Promise.resolve()
+            }
+            return new Promise((resolve, reject) => {
+                const s = document.createElement('script')
+                s.src = libUrl
+                s.async = true
+                s.onload = () => {
+                    if (typeof JitsiMeetJS === 'undefined') {
+                        reject(new Error('Script loaded but JitsiMeetJS global missing: ' + libUrl))
+                        return
+                    }
+                    loadedJitsiLibUrl = libUrl
+                    resolve()
+                }
+                s.onerror = () => reject(new Error('Could not load lib-jitsi-meet from ' + libUrl + ' (CORS / blocked?)'))
+                document.head.appendChild(s)
+            })
+        }
+
+        /** Remove any previously-loaded deploy config scripts and fetch the given URL fresh (cache-busted). */
+        function loadJitsiConfigScript(configUrl) {
+            return new Promise((resolve, reject) => {
+                document.querySelectorAll('script[data-jitsi-meet-deploy]').forEach((n) => n.remove())
+                try { delete window.config } catch (_) { window.config = undefined }
+
+                const s = document.createElement('script')
+                const sep = configUrl.indexOf('?') === -1 ? '?' : '&'
+                s.src = configUrl + sep + 't=' + Date.now()
+                s.async = true
+                s.dataset.jitsiMeetDeploy = '1'
+                s.onload = () => {
+                    if (!window.config || (!window.config.websocket && !window.config.bosh)) {
+                        reject(new Error('Loaded ' + configUrl + ' but window.config lacks websocket/bosh'))
+                        return
+                    }
+                    if (!window.config.websocket) {
+                        reject(new Error('config.js at ' + configUrl + ' only exposes BOSH; this example expects a websocket endpoint'))
+                        return
+                    }
+                    if (!window.config.hosts) {
+                        reject(new Error('config.js at ' + configUrl + ' lacks hosts (domain/muc) — cannot connect'))
+                        return
+                    }
+                    resolve(window.config)
+                }
+                s.onerror = () => reject(new Error('Could not load ' + configUrl + ' (network / CORS?)'))
+                document.head.appendChild(s)
+            })
+        }
+
+        // Logging function
+        function log(message) {
+            const timestamp = new Date().toLocaleTimeString()
+            logEl.innerHTML += `[${timestamp}] ${message}<br>`
+            logEl.scrollTop = logEl.scrollHeight
+            console.log(message)
+        }
+        
+        /** Paste Browser API key to send metrics to your PeerMetrics API; leave empty for mock (console only). */
+        const PEERMETRICS_API_KEY = '1dc7b13966224d53a9b0bf0a04311688'
+        const peermetricsUseMock = !String(PEERMETRICS_API_KEY).trim()
+
+        // Initialize PeerMetrics
+        async function initPeerMetrics() {
+            try {
+                const identity = getParticipantIdentity()
+                peerMetrics = new PeerMetrics({
+                    apiRoot: 'http://localhost:8081/v1',
+                    apiKey: String(PEERMETRICS_API_KEY).trim() || 'mock-local-only',
+                    userId: identity.userId,
+                    userName: identity.displayName,
+                    conferenceId: roomNameEl.value,
+                    conferenceName: 'Jitsi Demo Room',
+                    appVersion: '1.0.0',
+                    debug: true,
+                    mockRequests: peermetricsUseMock,
+                    wrapPeerConnection: true  // Enable automatic WebRTC connection wrapping
+                })
+                
+                await peerMetrics.initialize()
+                log('✅ PeerMetrics initialized successfully')
+                // Note: addSdkIntegration is deferred until after the JitsiConference
+                // is created so we can pass the `conference` instance and receive
+                // USER_JOINED / USER_LEFT events for the dashboard.
+                if (peermetricsUseMock) {
+                    log('ℹ️ PeerMetrics mockRequests: true (no HTTP). Set PEERMETRICS_API_KEY to send stats.')
+                }
+                
+            } catch (error) {
+                log('❌ PeerMetrics initialization failed: ' + error.message)
+            }
+        }
+        
+        function buildJitsiRoomName(roomName) {
+            const appId = String(jitsiAppIdEl.value || '').trim()
+            const normalizedRoom = String(roomName || '').trim()
+            if (!appId) return normalizedRoom
+            // If user pasted "appId/room", keep only the room part so we don't duplicate appId.
+            const leafRoom = normalizedRoom.indexOf('/') === -1
+                ? normalizedRoom
+                : normalizedRoom.split('/').filter(Boolean).pop()
+            return appId + '/' + leafRoom
+        }
+
+        function detectDeploymentModeFromInputs() {
+            const base = String(jitsiBaseUrlEl.value || '').trim()
+            const hasJaasBase = base.indexOf('8x8.vc') !== -1 || base.indexOf('jaas') !== -1
+            const hasAppId = String(jitsiAppIdEl.value || '').trim().length > 0
+            const hasJwt = String(jitsiJwtTokenEl.value || '').trim().length > 0
+            return (hasJaasBase || hasAppId || hasJwt) ? 'jaas' : 'own'
+        }
+
+        function isLikelyJaasConfig() {
+            const base = String(jitsiBaseUrlEl.value || '').trim()
+            const hasJaasBase = base.indexOf('8x8.vc') !== -1 || base.indexOf('jaas') !== -1
+            const hasAppId = String(jitsiAppIdEl.value || '').trim().length > 0
+            return hasJaasBase || hasAppId
+        }
+
+        function getEffectiveDeploymentMode() {
+            // The explicit selector should always win.
+            // Input-based inference is only for initial/default mode restoration.
+            return deploymentModeEl.value || 'own'
+        }
+
+        function applyDeploymentModeDefaults(mode, opts) {
+            const preserveBase = !!(opts && opts.preserveBase)
+            if (mode === 'jaas') {
+                if (!preserveBase && !String(jitsiBaseUrlEl.value || '').trim()) {
+                    jitsiBaseUrlEl.value = 'https://8x8.vc'
+                }
+                if (!String(jitsiAppIdEl.value || '').trim()) {
+                    jitsiAppIdEl.placeholder = 'vpaas-magic-cookie-... (required for JaaS)'
+                }
+                if (!String(jitsiJwtTokenEl.value || '').trim()) {
+                    jitsiJwtTokenEl.placeholder = 'eyJhbGciOi... (required for JaaS)'
+                }
+            } else {
+                if (!preserveBase && !String(jitsiBaseUrlEl.value || '').trim()) {
+                    jitsiBaseUrlEl.value = DEFAULT_JITSI_BASE_URL
+                }
+                jitsiAppIdEl.placeholder = 'vpaas-magic-cookie-...'
+                jitsiJwtTokenEl.placeholder = 'eyJhbGciOi...'
+            }
+            renderDeploymentModeHint(mode)
+        }
+
+        function renderDeploymentModeHint(mode) {
+            if (mode === 'jaas') {
+                deploymentModeHintEl.innerHTML =
+                    '<strong>JaaS checklist:</strong> Base URL (usually <code>https://8x8.vc</code>) + <code>App ID</code> + JWT per your app policy. This example always uses <strong>lib-jitsi-meet</strong> (auto <code>/&lt;appId&gt;/config.js</code> and <code>/&lt;appId&gt;/libs/lib-jitsi-meet.min.js</code> unless overridden). Room is built as <code>&lt;appId&gt;/&lt;room&gt;</code>. After you join, use <strong>Open 2nd participant</strong> if you need a second endpoint in the room for media.'
+                return
+            }
+            deploymentModeHintEl.innerHTML =
+                '<strong>Own setup checklist:</strong> Set your deployment base URL (or custom <code>config.js</code>/<code>lib-jitsi-meet</code> URLs). <code>App ID</code>/<code>JWT</code> are optional unless your server enforces auth.'
+        }
+
+        function updateMetricsCapabilityBadge() {
+            metricsCapabilityEl.classList.remove('limited')
+            metricsCapabilityEl.classList.add('full')
+            metricsCapabilityEl.textContent = 'Metrics capability: Full transport metrics (lib-jitsi-meet)'
+        }
+
+        function updateSecondParticipantButtonState() {
+            const mode = getEffectiveDeploymentMode()
+            openSecondParticipantBtn.disabled = mode !== 'jaas'
+        }
+
+        async function connectToJitsi(roomName, loadOpts) {
+            const urls = getJitsiUrls()
+            await ensureJitsiLibLoaded(urls.libUrl)
+            const forceRefresh = !!(loadOpts && loadOpts.forceRefresh)
+            const needConfig = forceRefresh || !(typeof window.config !== 'undefined' && window.config && window.config.websocket && window.config.hosts)
+            const deployment = needConfig ? await loadJitsiConfigScript(urls.configUrl) : window.config
+            const mode = getEffectiveDeploymentMode()
+            const appId = String(jitsiAppIdEl.value || '').trim()
+            const fullRoomName = buildJitsiRoomName(roomName)
+            const appScopedSegment = '/' + encodeURIComponent(appId) + '/'
+            const jaasScopedEndpoints = mode === 'jaas' && !!appId && (urls.configUrl.indexOf(appScopedSegment) !== -1 || urls.libUrl.indexOf(appScopedSegment) !== -1)
+            const roomForTransport = jaasScopedEndpoints ? roomName : fullRoomName
+            const baseWs = String(deployment.websocket || '')
+            if (!baseWs.startsWith('wss://')) {
+                throw new Error('deployment.websocket is not wss://. Check config.js served by ' + urls.base + '.')
+            }
+            const serviceUrl = appendURLParam(baseWs, 'room', roomForTransport)
+            const conferenceRequestUrl = deployment.conferenceRequestUrl
+            const websocketKeepAliveUrl = deployment.websocketKeepAliveUrl
+            const jwtToken = String(jitsiJwtTokenEl.value || '').trim()
+            if (mode === 'jaas') {
+                if (!appId) throw new Error('JaaS mode requires App ID')
+                if (urls.base.indexOf('8x8.vc') === -1) {
+                    throw new Error('JaaS mode requires a JaaS base URL (e.g. https://8x8.vc), not ' + urls.base)
+                }
+                if (jwtToken) {
+                    inspectJaasTokenClaims(jwtToken, appId, fullRoomName)
+                } else {
+                    log('ℹ️ JaaS mode without JWT token: attempting anonymous join (depends on your app policy).')
+                }
+            }
+            log('📡 serviceUrl (with room): ' + serviceUrl.slice(0, 100) + (serviceUrl.length > 100 ? '…' : ''))
+            log('📡 shard: ' + ((deployment.deploymentInfo && deployment.deploymentInfo.shard) || '(missing)'))
+            if (conferenceRequestUrl) log('📡 conferenceRequestUrl: ' + conferenceRequestUrl)
+            if (websocketKeepAliveUrl) log('📡 websocketKeepAliveUrl: ' + websocketKeepAliveUrl)
+            log(jwtToken ? '🔐 Auth mode: JWT token configured' : '🔓 Auth mode: anonymous')
+            log('🧭 Deployment mode: ' + (mode === 'jaas' ? 'JaaS' : 'Own setup'))
+            if (forceP2PEl && forceP2PEl.checked) {
+                log('🔒 Force P2P is enabled (applies to 1:1 calls; group calls can still use JVB/SFU).')
+            }
+            if (appId) {
+                log('🆔 App ID: ' + appId)
+                log('🏷️ Effective room: ' + fullRoomName)
+                if (jaasScopedEndpoints) {
+                    log('🧪 JaaS app-scoped endpoints detected; transport room uses leaf: ' + roomForTransport)
+                }
+            }
+            if (mode === 'jaas' && urls.base.indexOf('8x8.vc') === -1) {
+                log('⚠️ JaaS mode is selected but base URL is not 8x8.vc. Verify your JaaS endpoint.')
+            }
+
+            JitsiMeetJS.init({ disableThirdPartyRequests: false })
+
+            const connectionOpts = {
+                hosts: deployment.hosts,
+                serviceUrl: serviceUrl,
+                enableWebsocketResume: true,
+                conferenceRequestUrl: conferenceRequestUrl,
+                websocketKeepAliveUrl: websocketKeepAliveUrl,
+                deploymentInfo: deployment.deploymentInfo,
+                enableForcedReload: true
+            }
+            if (deployment.flags) connectionOpts.flags = deployment.flags
+            if (deployment.testing) {
+                const t = Object.assign({}, deployment.testing)
+                delete t.enableGracefulReconnect
+                if (Object.keys(t).length) connectionOpts.testing = t
+            }
+
+            disposeLocalTracks()
+            clearRemoteMedia()
+            clearJoinHangWatchdog()
+
+            if (currentConnection) {
+                try { currentConnection.disconnect() } catch (_) {}
+            }
+            // Register Jitsi transport hook *before* JitsiConnection is constructed so early
+            // RTCPeerConnection instances are not missed (otherwise /stats may never send).
+            if (peerMetrics && !peerMetrics.__jitsiTransportHook) {
+                try {
+                    await peerMetrics.addSdkIntegration({
+                        jitsi: {
+                            serverId: 'jitsi-sfu-server',
+                            serverName: 'Jitsi SFU Server'
+                        }
+                    })
+                    peerMetrics.__jitsiTransportHook = true
+                    log('✅ Jitsi transport hook registered (wrapPeerConnection + newConnection; SDK re-wraps after lib-jitsi if it replaced window.RTCPeerConnection)')
+                } catch (e) {
+                    log('⚠️ Could not add Jitsi integration: ' + (e && e.message ? e.message : e))
+                }
+            }
+            // For JaaS app-scoped endpoints, service URLs already encode tenant/app context.
+            const appIdForConnection = (mode === 'jaas' && !jaasScopedEndpoints) ? appId : null
+            const connection = new JitsiMeetJS.JitsiConnection(appIdForConnection, jwtToken || null, connectionOpts)
+            currentConnection = connection
+
+            const conferenceConfig = buildConferenceConfigFromDeployment(deployment)
+            room = connection.initJitsiConference(roomForTransport, conferenceConfig)
+
+            if (peerMetrics && peerMetrics.__jitsiTransportHook && typeof peerMetrics.attachJitsiConference === 'function') {
+                try {
+                    peerMetrics.attachJitsiConference(room)
+                    log('✅ Jitsi conference attached — participant lifecycle + late PC discovery enabled')
+                } catch (e) {
+                    log('⚠️ attachJitsiConference failed: ' + (e && e.message ? e.message : e))
+                }
+            }
+
+            room.addEventListener(JitsiMeetJS.events.conference.CONFERENCE_JOIN_IN_PROGRESS, () => {
+                log('⏳ Conference join in progress (MUC connecting…)…')
+                statusEl.textContent = 'Status: Join in progress…'
+            })
+
+            room.addEventListener(JitsiMeetJS.events.conference.CONFERENCE_FAILED, (err) => {
+                clearJoinHangWatchdog()
+                log('❌ CONFERENCE_FAILED: ' + stringifyErrorDetails(err))
+                const errStr = String(err)
+                const errDetails = stringifyErrorDetails(err)
+                const membersOnly = err === JITSI_MEMBERS_ONLY_ERROR
+                    || errStr.indexOf('membersOnly') !== -1
+                    || (JitsiMeetJS.errors && JitsiMeetJS.errors.conference && err === JitsiMeetJS.errors.conference.MEMBERS_ONLY_ERROR)
+                const restrictedCreation = errStr.indexOf('not-allowed') !== -1
+                    || errStr.indexOf('restricted') !== -1
+                    || errDetails.indexOf('Room creation is restricted') !== -1
+                lastConferenceFailureWasPolicyBlock = membersOnly || restrictedCreation
+                if (membersOnly) {
+                    log('💡 membersOnly: meet.jit.si limits anonymous / SDK-created meetings. Try "Random room", create the room once in https://meet.jit.si/ (signed in), or use your own Jitsi or JaaS.')
+                }
+                if (restrictedCreation && !membersOnly) {
+                    log('💡 Room creation is restricted on this server for your current auth level. This is expected on public meet.jit.si for many SDK flows.')
+                }
+                if (errStr.indexOf('display') !== -1 || errStr.indexOf('Display') !== -1) {
+                    log('💡 meet.jit.si often requires setDisplayName() before room.join() — this build does that; if you still see this, try another room name.')
+                }
+                statusEl.textContent = 'Status: Conference failed'
+                joinBtn.disabled = false
+                updateSecondParticipantButtonState()
+            })
+
+            connection.addEventListener(JitsiMeetJS.events.connection.CONNECTION_ESTABLISHED, () => {
+                log('✅ Jitsi XMPP connection established')
+                statusEl.textContent = 'Status: Requesting camera & microphone…'
+                void (async () => {
+                    try {
+                        log('🎤 Calling getUserMedia via JitsiMeetJS.createLocalTracks…')
+                        localTracks = await JitsiMeetJS.createLocalTracks({
+                            devices: ['audio', 'video'],
+                            resolution: '720'
+                        })
+                        localTracks.forEach((track) => {
+                            room.addTrack(track)
+                            if (track.getType() === 'video') {
+                                track.attach(localVideoEl)
+                            }
+                        })
+                        log('✅ Local tracks added; setting display name & joining MUC…')
+                        statusEl.textContent = 'Status: Joining conference…'
+                        const identity = getParticipantIdentity()
+                        room.setDisplayName(identity.displayName)
+                        log('🪪 Participant identity: ' + identity.displayName)
+                        log('⏳ room.join() — if this stalls, jicofo HTTP conference-request may be slow; watch for room.join() promise resolved or CONFERENCE_FAILED.')
+                        clearJoinHangWatchdog()
+                        joinHangWatchdog = setTimeout(() => {
+                            joinHangWatchdog = null
+                            log('⚠️ No CONFERENCE_JOINED after 45s. Hard-refresh (Ctrl+Shift+R) to drop a cached jitsi.html; open DevTools → Network/Console; try another room name.')
+                            statusEl.textContent = 'Status: Join still pending…'
+                        }, 45000)
+                        const joinResult = room.join()
+                        if (joinResult && typeof joinResult.then === 'function') {
+                            joinResult.then(() => log('✅ room.join() promise resolved (MUC presence sent; wait for CONFERENCE_JOINED)')).catch((e) => {
+                                clearJoinHangWatchdog()
+                                log('❌ room.join() rejected: ' + (e && e.message ? e.message : e))
+                                joinBtn.disabled = false
+                            })
+                        }
+                    } catch (err) {
+                        clearJoinHangWatchdog()
+                        const msg = err && err.message ? err.message : String(err)
+                        log('❌ createLocalTracks failed: ' + msg)
+                        statusEl.textContent = 'Status: Media failed'
+                        joinBtn.disabled = false
+                        try { connection.disconnect() } catch (_) {}
+                    }
+                })()
+            })
+
+            connection.addEventListener(JitsiMeetJS.events.connection.CONNECTION_FAILED, async (error) => {
+                clearJoinHangWatchdog()
+                log('❌ Connection failed: ' + stringifyErrorDetails(error))
+                const isShardChange = error === 'connection.shardChangedError'
+                const isOtherRecoverable = error === 'connection.otherError'
+                if (isOtherRecoverable && lastConferenceFailureWasPolicyBlock) {
+                    log('🛑 Not retrying: previous conference failure indicates server policy/auth restriction (not a transient network issue).')
+                    statusEl.textContent = 'Status: Blocked by server policy/auth'
+                    joinBtn.disabled = false
+                    return
+                }
+
+                if ((isShardChange || isOtherRecoverable) && reconnectCount < MAX_RECONNECTS) {
+                    reconnectCount++
+                    const delay = reconnectCount * 1000
+                    log('🔄 Recovering — ' + (isShardChange ? 'reload config + reconnect' : 'retry') + ' (' + reconnectCount + '/' + MAX_RECONNECTS + ') in ' + delay + 'ms…')
+                    statusEl.textContent = 'Status: Reconnecting (' + reconnectCount + '/' + MAX_RECONNECTS + ')…'
+                    reconnectingForShard = true
+                    try { connection.disconnect() } catch (_) {}
+                    await new Promise(r => setTimeout(r, delay))
+                    try {
+                        if (isShardChange) {
+                            log('🔄 Fetching fresh config.js from ' + getJitsiUrls().configUrl + ' (new websocket / shard)…')
+                        }
+                        await connectToJitsi(roomName, { forceRefresh: isShardChange })
+                    } catch (e) {
+                        clearJoinHangWatchdog()
+                        log('❌ Reconnect failed: ' + (e && e.message ? e.message : e))
+                        statusEl.textContent = 'Status: Connection failed'
+                        joinBtn.disabled = false
+                    } finally {
+                        reconnectingForShard = false
+                    }
+                    return
+                }
+                if (error === 'connection.passwordRequired') {
+                    log('💡 Authentication required — expected on public meet.jit.si')
+                } else if (error === 'connection.conferenceRequestFailed') {
+                    log('💡 conferenceRequestFailed usually means JWT/AppID validation failed (expired token, wrong iss/aud/sub/room claims, or token not issued for this App ID).')
+                } else if (isShardChange && reconnectCount >= MAX_RECONNECTS) {
+                    log('💡 Shard still changing after ' + MAX_RECONNECTS + ' tries — reload the page or use your own Jitsi server.')
+                } else {
+                    log('💡 ' + error + ' — try a different room name, network, or your own Jitsi server')
+                }
+                statusEl.textContent = 'Status: Connection failed'
+                joinBtn.disabled = false
+                updateSecondParticipantButtonState()
+            })
+
+            connection.addEventListener(JitsiMeetJS.events.connection.CONNECTION_DISCONNECTED, () => {
+                clearJoinHangWatchdog()
+                if (reconnectingForShard) {
+                    log('(Disconnected for reconnect)')
+                    return
+                }
+                log('❌ Jitsi connection disconnected')
+                statusEl.textContent = 'Status: Disconnected'
+                joinBtn.disabled = false
+                leaveBtn.disabled = true
+                toggleVideoBtn.disabled = true
+                toggleAudioBtn.disabled = true
+                updateSecondParticipantButtonState()
+            })
+
+            // Handle visitor-node redirects (meet.jit.si may redirect to a vnode)
+            if (JitsiMeetJS.events.connection.CONNECTION_REDIRECTED) {
+                connection.addEventListener(JitsiMeetJS.events.connection.CONNECTION_REDIRECTED, async (vnode, focusJid) => {
+                    log('🔀 Redirected to visitor node: ' + (vnode || '(main)'))
+                    if (!vnode) return
+                    try { connection.disconnect() } catch (_) {}
+                    reconnectCount++
+                    if (reconnectCount > MAX_RECONNECTS) {
+                        clearJoinHangWatchdog()
+                        log('❌ Too many redirects')
+                        statusEl.textContent = 'Status: Connection failed'
+                        joinBtn.disabled = false
+                        return
+                    }
+                    // Rewrite websocket URL with vnode param, same as official client
+                    const vnodeWs = appendURLParam(deployment.websocket, 'vnode', vnode)
+                    const vnodeDomain = vnode + '.' + deployment.hosts.domain
+                    const saved = { websocket: deployment.websocket, hosts: Object.assign({}, deployment.hosts) }
+                    deployment.websocket = vnodeWs
+                    deployment.hosts = {
+                        domain: vnodeDomain,
+                        muc: deployment.hosts.muc.replace(saved.hosts.domain, vnodeDomain)
+                    }
+                    if (focusJid) deployment.focusUserJid = focusJid
+                    log('🔄 Reconnecting to visitor node…')
+                    try {
+                        await connectToJitsi(roomName)
+                    } catch (e) {
+                        clearJoinHangWatchdog()
+                        log('❌ Visitor-node reconnect failed: ' + (e && e.message ? e.message : e))
+                        deployment.websocket = saved.websocket
+                        deployment.hosts = saved.hosts
+                        statusEl.textContent = 'Status: Connection failed'
+                        joinBtn.disabled = false
+                    }
+                })
+            }
+
+            room.addEventListener(JitsiMeetJS.events.conference.CONFERENCE_JOINED, () => {
+                clearJoinHangWatchdog()
+                lastConferenceFailureWasPolicyBlock = false
+                reconnectCount = 0
+                log('✅ Joined Jitsi room successfully')
+                statusEl.textContent = 'Status: Connected'
+                leaveBtn.disabled = false
+                toggleVideoBtn.disabled = false
+                toggleAudioBtn.disabled = false
+                if (peerMetrics) {
+                    peerMetrics.addEvent({
+                        eventName: 'jitsi_room_joined',
+                        description: 'Joined Jitsi room',
+                        metadata: { roomName: fullRoomName, transportRoomName: roomForTransport }
+                    })
+                }
+                updateSecondParticipantButtonState()
+            })
+
+            room.addEventListener(JitsiMeetJS.events.conference.CONFERENCE_LEFT, () => {
+                clearJoinHangWatchdog()
+                log('❌ Left Jitsi room')
+                statusEl.textContent = 'Status: Disconnected'
+                joinBtn.disabled = false
+                leaveBtn.disabled = true
+                toggleVideoBtn.disabled = true
+                toggleAudioBtn.disabled = true
+                updateSecondParticipantButtonState()
+            })
+
+            room.addEventListener(JitsiMeetJS.events.conference.TRACK_ADDED, (track) => {
+                if (track.isLocal()) return
+                const type = track.getType()
+                const vType = type === 'video' && typeof track.getVideoType === 'function'
+                    ? track.getVideoType()
+                    : ''
+                const slotKey = [track.getParticipantId(), type, vType].filter(Boolean).join('-')
+                for (const node of Array.from(remoteVideosEl.querySelectorAll('[data-participant]'))) {
+                    if (node.dataset.participant === slotKey) {
+                        node.remove()
+                    }
+                }
+                const el = document.createElement(type === 'video' ? 'video' : 'audio')
+                el.autoplay = true
+                if (type === 'video') el.playsInline = true
+                el.dataset.participant = slotKey
+                track.attach(el)
+                remoteTrackMediaElements.set(track, el)
+                remoteVideosEl.appendChild(el)
+            })
+
+            room.addEventListener(JitsiMeetJS.events.conference.TRACK_REMOVED, (track) => {
+                if (track.isLocal()) return
+                const el = remoteTrackMediaElements.get(track)
+                try { track.detach() } catch (_) {}
+                if (el && el.parentNode) {
+                    el.parentNode.removeChild(el)
+                }
+                remoteTrackMediaElements.delete(track)
+            })
+
+            room.addEventListener(JitsiMeetJS.events.conference.USER_JOINED, (id, user) => {
+                const displayName = (typeof user?.getDisplayName === 'function' ? user.getDisplayName() : user?.displayName) || 'Unknown'
+                log('👤 User joined: ' + displayName + ' (id=' + id + ')')
+            })
+
+            room.addEventListener(JitsiMeetJS.events.conference.USER_LEFT, (id, user) => {
+                const displayName = (typeof user?.getDisplayName === 'function' ? user.getDisplayName() : user?.displayName) || 'Unknown'
+                log('👤 User left: ' + displayName + ' (id=' + id + ')')
+            })
+
+            if (JitsiMeetJS.events.conference.P2P_STATUS) {
+                room.addEventListener(JitsiMeetJS.events.conference.P2P_STATUS, (active) => {
+                    const modeLabel = active ? 'P2P' : 'JVB/SFU'
+                    log('🔎 Actual Jitsi media mode: ' + modeLabel + ' (from conference.P2P_STATUS)')
+                    if (!active && forceP2PEl && forceP2PEl.checked) {
+                        log('ℹ️ Force P2P is a preference only; this deployment/session is currently on JVB/SFU.')
+                    }
+                })
+            } else {
+                log('ℹ️ P2P_STATUS event not available in this lib-jitsi-meet build.')
+            }
+
+            connection.connect({ name: roomForTransport })
+        }
+
+        // Join Jitsi room using SDK
+        async function joinRoom() {
+            try {
+                let mode = getEffectiveDeploymentMode()
+                if (mode === 'own' && isLikelyJaasConfig()) {
+                    deploymentModeEl.value = 'jaas'
+                    persistServerInputs()
+                    mode = 'jaas'
+                    updateMetricsCapabilityBadge()
+                    updateSecondParticipantButtonState()
+                    log('🛠️ Auto-corrected mode to JaaS based on current base URL/App ID.')
+                }
+                const rawRoomName = roomNameEl.value.trim() || 'PeerMetricsDemo'
+                // For JaaS, users may paste "appId/room" from docs; extract only room leaf.
+                const roomLeaf = mode === 'jaas' && rawRoomName.indexOf('/') !== -1
+                    ? rawRoomName.split('/').filter(Boolean).pop()
+                    : rawRoomName
+                // Keep original casing for JaaS room names (token room matching can be case-sensitive).
+                const roomName = mode === 'jaas'
+                    ? String(roomLeaf || '').trim()
+                    : String(roomLeaf || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+                
+                if (roomName.length === 0) {
+                    throw new Error('Room name must contain at least one alphanumeric character')
+                }
+                
+                log('🔄 Joining Jitsi room: ' + roomName)
+                statusEl.textContent = 'Status: Connecting...'
+                joinBtn.disabled = true
+                
+                // Initialize PeerMetrics first
+                if (!peerMetrics) {
+                    await initPeerMetrics()
+                }
+
+                reconnectCount = 0
+                if (mode === 'jaas') {
+                    log('🧭 Deployment mode: JaaS (lib-jitsi-meet)')
+                }
+                await connectToJitsi(roomName)
+                
+            } catch (error) {
+                clearJoinHangWatchdog()
+                log('❌ Failed to join Jitsi room: ' + error.message)
+                statusEl.textContent = 'Status: Connection failed'
+                joinBtn.disabled = false
+                updateSecondParticipantButtonState()
+            }
+        }
+        
+        function leaveRoom() {
+            try {
+                clearJoinHangWatchdog()
+                disposeLocalTracks()
+                clearRemoteMedia()
+                if (room) {
+                    room.leave()
+                    room = null
+                }
+                if (currentConnection) {
+                    currentConnection.disconnect()
+                    currentConnection = null
+                }
+                log('✅ Left Jitsi room')
+                statusEl.textContent = 'Status: Disconnected'
+                joinBtn.disabled = false
+                leaveBtn.disabled = true
+                toggleVideoBtn.disabled = true
+                toggleAudioBtn.disabled = true
+                updateSecondParticipantButtonState()
+            } catch (error) {
+                log('❌ Error leaving room: ' + error.message)
+            }
+        }
+        
+        // Toggle video
+        async function toggleVideo() {
+            try {
+                if (room) {
+                    const videoTrack = localTracks.find((t) => t && t.getType && t.getType() === 'video')
+                    if (!videoTrack) {
+                        log('⚠️ No local video track available to toggle')
+                        return
+                    }
+                    if (isVideoEnabled) {
+                        await videoTrack.mute()
+                    } else {
+                        await videoTrack.unmute()
+                    }
+                    isVideoEnabled = !isVideoEnabled
+                    log('📹 Video ' + (isVideoEnabled ? 'enabled' : 'disabled'))
+                    
+                    if (peerMetrics) {
+                        peerMetrics.addEvent({
+                            eventName: 'jitsi_video_toggled',
+                            description: 'Video toggled',
+                            metadata: { enabled: isVideoEnabled }
+                        })
+                    }
+                }
+            } catch (error) {
+                log('❌ Error toggling video: ' + error.message)
+            }
+        }
+        
+        // Toggle audio
+        async function toggleAudio() {
+            try {
+                if (room) {
+                    const audioTrack = localTracks.find((t) => t && t.getType && t.getType() === 'audio')
+                    if (!audioTrack) {
+                        log('⚠️ No local audio track available to toggle')
+                        return
+                    }
+                    if (isAudioEnabled) {
+                        await audioTrack.mute()
+                    } else {
+                        await audioTrack.unmute()
+                    }
+                    isAudioEnabled = !isAudioEnabled
+                    log('🎤 Audio ' + (isAudioEnabled ? 'enabled' : 'disabled'))
+                    
+                    if (peerMetrics) {
+                        peerMetrics.addEvent({
+                            eventName: 'jitsi_audio_toggled',
+                            description: 'Audio toggled',
+                            metadata: { enabled: isAudioEnabled }
+                        })
+                    }
+                }
+            } catch (error) {
+                log('❌ Error toggling audio: ' + error.message)
+            }
+        }
+
+        // Event listeners
+        function fillRandomRoomName() {
+            const mode = getEffectiveDeploymentMode()
+            if (mode === 'jaas' || isLikelyJaasConfig()) {
+                const jwtToken = String(jitsiJwtTokenEl.value || '').trim()
+                const payload = decodeJwtPayload(jwtToken)
+                const roomClaim = payload && payload.room ? String(payload.room) : ''
+                if (roomClaim && roomClaim !== '*') {
+                    const leaf = roomClaim.indexOf('/') === -1
+                        ? roomClaim
+                        : roomClaim.split('/').filter(Boolean).pop()
+                    roomNameEl.value = leaf
+                    log('🔒 JaaS token is restricted to room "' + roomClaim + '"; random room disabled for this token.')
+                    return
+                }
+            }
+            const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789'
+            let suffix = ''
+            for (let i = 0; i < 10; i++) {
+                suffix += alphabet.charAt(Math.floor(Math.random() * alphabet.length))
+            }
+            roomNameEl.value = 'pm' + suffix
+            log('🔀 Room name set to ' + roomNameEl.value + ' (join again)')
+        }
+
+        function persistServerInputs() {
+            try {
+                localStorage.setItem(LS_PREFIX + 'baseUrl', jitsiBaseUrlEl.value || '')
+                localStorage.setItem(LS_PREFIX + 'configUrl', jitsiConfigUrlEl.value || '')
+                localStorage.setItem(LS_PREFIX + 'libUrl', jitsiLibUrlEl.value || '')
+                localStorage.setItem(LS_PREFIX + 'jwtToken', jitsiJwtTokenEl.value || '')
+                localStorage.setItem(LS_PREFIX + 'appId', jitsiAppIdEl.value || '')
+                localStorage.setItem(LS_PREFIX + 'deploymentMode', deploymentModeEl.value || 'own')
+                localStorage.setItem(LS_PREFIX + 'forceP2P', forceP2PEl && forceP2PEl.checked ? '1' : '0')
+                localStorage.setItem(LS_PREFIX + 'roomName', roomNameEl.value || '')
+            } catch (_) {}
+        }
+
+        function restoreServerInputs() {
+            try {
+                const base = localStorage.getItem(LS_PREFIX + 'baseUrl')
+                const cfg = localStorage.getItem(LS_PREFIX + 'configUrl')
+                const lib = localStorage.getItem(LS_PREFIX + 'libUrl')
+                const jwt = localStorage.getItem(LS_PREFIX + 'jwtToken')
+                const appId = localStorage.getItem(LS_PREFIX + 'appId')
+                const mode = localStorage.getItem(LS_PREFIX + 'deploymentMode')
+                const forceP2P = localStorage.getItem(LS_PREFIX + 'forceP2P')
+                const room = localStorage.getItem(LS_PREFIX + 'roomName')
+                if (base) jitsiBaseUrlEl.value = base
+                if (cfg) jitsiConfigUrlEl.value = cfg
+                if (lib) jitsiLibUrlEl.value = lib
+                if (jwt) jitsiJwtTokenEl.value = jwt
+                if (appId) jitsiAppIdEl.value = appId
+                deploymentModeEl.value = mode || detectDeploymentModeFromInputs()
+                if (forceP2PEl) forceP2PEl.checked = forceP2P === '1'
+                if (room) roomNameEl.value = room
+                applyDeploymentModeDefaults(deploymentModeEl.value, { preserveBase: true })
+            } catch (_) {}
+        }
+
+        function resetServerInputs() {
+            deploymentModeEl.value = 'own'
+            jitsiBaseUrlEl.value = DEFAULT_JITSI_BASE_URL
+            jitsiConfigUrlEl.value = ''
+            jitsiLibUrlEl.value = ''
+            jitsiJwtTokenEl.value = ''
+            jitsiAppIdEl.value = ''
+            if (forceP2PEl) forceP2PEl.checked = false
+            applyDeploymentModeDefaults('own', { preserveBase: true })
+            persistServerInputs()
+            log('🔁 Server reset to ' + DEFAULT_JITSI_BASE_URL)
+            updateSecondParticipantButtonState()
+            updateMetricsCapabilityBadge()
+        }
+
+        function openSecondParticipantTab() {
+            const mode = getEffectiveDeploymentMode()
+            if (mode !== 'jaas') {
+                log('⚠️ Open 2nd participant is available in JaaS mode only.')
+                return
+            }
+            persistServerInputs()
+            const next = new URL(window.location.href)
+            next.searchParams.set('autojoin', '1')
+            next.searchParams.set('participant', '2')
+            next.searchParams.set('userId', 'pm-user-2-' + Date.now().toString(36))
+            window.open(next.toString(), '_blank', 'noopener,noreferrer')
+            log('🪟 Opened second participant tab (auto-join enabled).')
+        }
+
+        deploymentModeEl.addEventListener('change', () => {
+            const mode = deploymentModeEl.value || 'own'
+            applyDeploymentModeDefaults(mode, { preserveBase: false })
+            persistServerInputs()
+            updateSecondParticipantButtonState()
+            updateMetricsCapabilityBadge()
+            if (mode === 'jaas') {
+                log('🧭 Mode set: JaaS. Provide App ID + JWT and use your JaaS base URL (often https://8x8.vc).')
+            } else {
+                log('🧭 Mode set: Own setup. App ID/JWT optional; use your own Jitsi deployment URLs.')
+            }
+        })
+
+        ;[jitsiBaseUrlEl, jitsiConfigUrlEl, jitsiLibUrlEl, jitsiJwtTokenEl, jitsiAppIdEl, roomNameEl].forEach((el) => {
+            el.addEventListener('change', persistServerInputs)
+            el.addEventListener('blur', persistServerInputs)
+        })
+        if (forceP2PEl) {
+            forceP2PEl.addEventListener('change', () => {
+                persistServerInputs()
+                log('🧭 Force P2P: ' + (forceP2PEl.checked ? 'enabled' : 'disabled'))
+            })
+        }
+        resetServerBtn.addEventListener('click', resetServerInputs)
+        randomRoomBtn.addEventListener('click', fillRandomRoomName)
+        joinBtn.addEventListener('click', joinRoom)
+        leaveBtn.addEventListener('click', leaveRoom)
+        toggleVideoBtn.addEventListener('click', toggleVideo)
+        toggleAudioBtn.addEventListener('click', toggleAudio)
+        openSecondParticipantBtn.addEventListener('click', openSecondParticipantTab)
+        
+        // Initialize when page loads
+        function initialize() {
+            restoreServerInputs()
+            if (deploymentModeEl.value === 'own' && isLikelyJaasConfig()) {
+                deploymentModeEl.value = 'jaas'
+                persistServerInputs()
+            }
+            const identity = getParticipantIdentity()
+            const urls = getJitsiUrls()
+            log('🚀 Jitsi Meet SDK integration example loaded (' + EXAMPLE_BUILD_ID + ')')
+            log('🔧 PeerMetrics: ' + (peermetricsUseMock ? 'mockRequests (set PEERMETRICS_API_KEY to send stats)' : 'sending stats to API'))
+            log('🧭 Mode: ' + (deploymentModeEl.value === 'jaas' ? 'B) JaaS' : 'A) Own setup'))
+            log('🪪 Local participant: ' + identity.displayName)
+            log('🌐 Jitsi server: ' + urls.base)
+            log('🧩 lib-jitsi-meet: ' + urls.libUrl)
+            log('🧩 config.js: ' + urls.configUrl)
+            log('🎯 Full WebRTC monitoring: RTCPeerConnection objects will be captured automatically')
+            log('ℹ️ Click Join to load the Jitsi library/config from the server above.')
+            updateSecondParticipantButtonState()
+            updateMetricsCapabilityBadge()
+            if (startupQueryParams.get('autojoin') === '1') {
+                const delay = startupQueryParams.get('participant') === '2' ? 600 : 300
+                setTimeout(() => {
+                    void joinRoom()
+                }, delay)
+                log('🤖 Auto-join requested by URL parameters.')
+            }
+        }
+        
+        // Wait for page to load
+        if (document.readyState === 'loading') {
+            window.addEventListener('load', initialize)
+        } else {
+            initialize()
+        }
+    </script>
+</body>
+</html>

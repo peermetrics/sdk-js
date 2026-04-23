@@ -22,11 +22,12 @@ You can read more about the service on [peermetrics.io](https://peermetrics.io/)
    4. [Janus](#janus)
    5. [Vonage](#vonage)
    6. [Agora](#agora)
-   7. [Pion](#pion)
-   8. [SimplePeer](#simplepeer)
+   7. [Jitsi Meet](#jitsi-meet)
+   8. [Pion](#pion)
 4. [Browser support](#browser-support)
 5. [Use cases](#use-cases)
-6. [License](#license)
+6. [Documentation](#documentation)
+7. [License](#license)
 
 
 
@@ -428,6 +429,49 @@ peerMetrics.addSdkIntegration({
 })
 ```
 
+### Jitsi Meet
+
+To integrate with [Jitsi Meet](https://jitsi.org/jitsi-meet/), use the built-in Jitsi integration. The SDK will automatically detect and monitor every `RTCPeerConnection` that Jitsi creates.
+
+These lines are PeerMetrics-specific:
+
+```js
+const peerMetrics = new PeerMetrics({
+    apiKey: 'your-api-key',
+    userId: 'user-123',
+    userName: 'John Doe',
+    conferenceId: 'room-123',
+    conferenceName: 'My Conference',
+    wrapPeerConnection: true   // let PeerMetrics wrap RTCPeerConnection before Jitsi creates any
+})
+await peerMetrics.initialize()
+
+const room = connection.initJitsiConference(roomName, conferenceConfig)
+
+await peerMetrics.addSdkIntegration({
+    jitsi: {
+        serverId: 'jitsi-sfu-server',
+        serverName: 'Jitsi SFU Server',
+        conference: room // optional, forwards USER_JOINED/USER_LEFT as custom events
+    }
+})
+
+// …then continue with your normal Jitsi Meet SDK flow (JitsiConnection, initJitsiConference, room.join(), etc.)
+```
+
+Notes:
+- `wrapPeerConnection: true` (or `PeerMetrics.wrapPeerConnection()`) must be enabled before Jitsi creates peer connections.
+- If you pass `conference`, call `addSdkIntegration({ jitsi })` after `initJitsiConference(...)` so you can provide the live room instance.
+- Multiple Jitsi peer connections are supported and tracked with distinct `connectionId`s; peer mapping may be transport-scoped (`P2P` / `JVB`) when inferable.
+- `conference` adds participant lifecycle custom events (`jitsiUserJoined`, `jitsiUserLeft`, `jitsiDisplayNameChanged`, track add/remove hints); transport stats still come from monitored RTCPeerConnections.
+
+Known backend assumption:
+- Conference and participant counters depend on backend aggregation of these lifecycle and connection events. If counters are off while events are present, the issue is likely in backend aggregation logic rather than SDK emission.
+
+See the runnable demo in [`examples/jitsi.html`](./examples/jitsi.html), which lets you point the integration at `meet.jit.si` or a self-hosted Jitsi server.
+
+</details>
+
 ### Pion
 
 Integrating with Pion is dead simple. If for example you are using [ion sdk js](https://github.com/pion/ion-sdk-js), just initialize peer metrics first and you are good to go:
@@ -460,26 +504,6 @@ peerMetrics.addSdkIntegration({
     }
 })
 ```
-
-### SimplePeer
-
-To integrate with `SimplePeer` you would just need to pass the `RTCPeerConnection` to `PeerMetrics`. For example:
-
-```js
-var peer = new SimplePeer({
-    initiator: true,
-    config: iceServers,
-    stream: stream,
-    trickle: true
-})
-
-peerMetrics.addConnection({
-    pc: peer._pc,
-    peerId: peerId
-})
-```
-
-
 
 ## Browser support
 
@@ -539,6 +563,15 @@ For example:
 6. Continue from step `3`
 
 
+
+## Documentation
+
+For comprehensive documentation including detailed API reference, architecture overview, and development guidelines, see the [`docs/`](./docs/) folder:
+
+- **[API Reference](./docs/api-reference.md)** - Complete API documentation with examples
+- **[Integration Guides](./docs/integrations.md)** - Detailed integration patterns for WebRTC SDKs
+- **[Architecture](./docs/architecture.md)** - System design and component overview
+- **[Development Guide](./docs/development.md)** - Coding standards, testing, and contribution guidelines
 
 ## License
 MIT

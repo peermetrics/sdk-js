@@ -2,7 +2,19 @@
 export * from './api'
 
 declare global {
-    interface Window { PeerMetricsOptions: any; }
+    interface Window { 
+        PeerMetricsOptions: any;
+        JitsiMeetJS?: {
+            app?: {
+                _room?: {
+                    rtc?: any;
+                };
+            };
+        };
+        LiveKit?: any;
+        Twilio?: any;
+        AgoraRTC?: any;
+    }
 }
 
 export interface PageEvents {
@@ -46,6 +58,32 @@ export interface PionIntegrationInterface {
     serverName?: string
 }
 
+export interface JitsiIntegrationInterface {
+    serverId?: string
+    serverName?: string
+    /**
+     * Optional reference to the active `JitsiConference` instance.
+     *
+     * When provided, the integration listens to `USER_JOINED` / `USER_LEFT`
+     * events and forwards them as custom events so remote participants are
+     * visible in the dashboard even though the SFU transport is monitored as
+     * a single peer. When omitted, the integration still works but only
+     * reports the transport.
+     */
+    conference?: any
+}
+
+export interface JitsiParticipantEvent {
+    eventName: string
+    participantId?: string
+    displayName?: string
+    trackType?: string
+    trackId?: string
+    reason?: string
+    participantsTracked?: number
+    [key: string]: any
+}
+
 export interface SdkIntegrationInterface {
     mediasoup?: MediaSoupIntegration,
     janus?: JanusIntegrationInterface,
@@ -54,6 +92,7 @@ export interface SdkIntegrationInterface {
     vonage?: boolean
     agora?: boolean
     pion?: boolean | PionIntegrationInterface
+    jitsi?: boolean | JitsiIntegrationInterface
 }
 
 export interface InitializeObject {
@@ -90,6 +129,20 @@ export interface AddConnectionOptions {
     remote?: boolean,
     peerName?: string,
     isSfu?: boolean
+}
+
+/** Options for PeerMetrics.autoDetectConnections() */
+export interface AutoDetectConnectionsOptions {
+    /**
+     * When true, treat detected connections as SFU-side (e.g. server transports).
+     * Default false so plain P2P / unknown stacks are not mislabeled.
+     */
+    isSfu?: boolean
+    /**
+     * When true, recursively walks `window` (expensive; may invoke framework getters).
+     * Default false — only known SDK globals and patterns are scanned.
+     */
+    scanBrowserGlobals?: boolean
 }
 
 export interface RemoveConnectionOptions {
