@@ -281,6 +281,17 @@ await peerMetrics.endCall()
 #### Returns
 - `Promise<void>`: Resolves when session is ended
 
+### endConference() (deprecated)
+
+Backward-compatible alias for `endCall()`.
+
+```typescript
+await peerMetrics.endConference()
+```
+
+#### Returns
+- `Promise<void>`: Resolves when session is ended
+
 ## 🛠️ Static Methods
 
 ### wrapPeerConnection()

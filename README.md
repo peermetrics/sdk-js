@@ -151,6 +151,16 @@ The helper method stops listening to events on all connections and also ends the
 
 This is useful for the case when multiple conferences happen consecutively without the user refreshing the page.
 
+#### `.endConference()` (deprecated)
+
+Backward-compatible alias for `.endCall()`.
+
+```js
+await peerMetrics.endConference()
+```
+
+Prefer using `.endCall()` in new integrations.
+
 
 
 #### `.removeConnection(options)`

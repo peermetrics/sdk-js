@@ -758,6 +758,14 @@ export class PeerMetrics {
     return this.apiWrapper.sendEndCall()
   }
 
+  /**
+   * @deprecated Use endCall() instead.
+   * Backward-compatible alias retained for SDK consumers.
+   */
+  async endConference () {
+    return this.endCall()
+  }
+
   private addPageEventListeners (options: PageEvents) {
     window.addEventListener('beforeunload', this._eventListenersCallbacks.beforeunload)
 
