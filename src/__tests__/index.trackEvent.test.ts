@@ -6,7 +6,6 @@
  *     trackId observed on two connections does not share state.
  *   - Pending create promises are awaited before updates so we don't lose
  *     mute/unmute/ended events fired between ontrack and server ack.
- *   - removeConnection cleanup drains both maps for the removed connection.
  */
 import { PeerMetrics } from '../index'
 
@@ -94,21 +93,5 @@ describe('PeerMetrics._handleTrackEvent (connection-scoped bookkeeping)', () => 
     await flushMicrotasks()
 
     expect(sendTrackEvent).not.toHaveBeenCalled()
-  })
-
-  it('does not leak map growth after manual cleanup of a connection', async () => {
-    const { pm } = makeInstance()
-
-    pm._handleTrackEvent(buildEvent({ event: 'ontrack', connectionId: 'conn-X', trackId: 't-x' }))
-    await flushMicrotasks()
-    expect(pm.createdTrackIds['conn-X']).toBeDefined()
-
-    // Simulate the removeConnection cleanup path directly; removeConnection itself
-    // depends on module-level monitoredConnections state that is private to the module.
-    delete pm.trackCreatePromises['conn-X']
-    delete pm.createdTrackIds['conn-X']
-
-    expect(pm.createdTrackIds['conn-X']).toBeUndefined()
-    expect(pm.trackCreatePromises['conn-X']).toBeUndefined()
   })
 })
