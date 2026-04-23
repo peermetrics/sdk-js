@@ -144,6 +144,21 @@ Adds a connection to the watch list.
 **Note:** Monitoring of a peer will automatically end when the connection is closed.
 
 
+#### `.autoDetectConnections(options)`
+
+Best-effort helper to discover `RTCPeerConnection` objects from known SDK globals/patterns and call `.addConnection(...)` for what it finds.
+
+Use this as a convenience/debug fallback (for demos, legacy code, or recovery when you cannot hook connection creation early).
+
+For production integrations, prefer deterministic paths first:
+
+- `.wrapPeerConnection()`
+- `.addSdkIntegration(...)`
+- explicit `.addConnection(...)`
+
+`.autoDetectConnections()` depends on runtime object shapes and timing, so behavior can vary across SDK/browser upgrades.
+
+
 
 #### `.endCall()`
 

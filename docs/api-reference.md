@@ -122,12 +122,21 @@ const { connectionId } = await peerMetrics.addConnection({
 
 ### autoDetectConnections(options?)
 
-Finds `RTCPeerConnection` instances via SDK globals / known shapes and calls `addConnection` once per PC (deduped).
+Best-effort helper to discover `RTCPeerConnection` objects from known SDK globals/patterns and call `addConnection(...)` for what it finds.
 
 ```typescript
 await peerMetrics.autoDetectConnections() // default: not SFU, no full window scan
 await peerMetrics.autoDetectConnections({ isSfu: true, scanBrowserGlobals: false })
 ```
+
+Use this as a convenience/debug fallback (for demos, legacy code, or recovery when you cannot hook connection creation early).
+
+For production integrations, prefer deterministic paths first:
+- `wrapPeerConnection()`
+- `addSdkIntegration(...)`
+- explicit `addConnection(...)`
+
+`autoDetectConnections()` depends on runtime object shapes and timing, so behavior can vary across SDK/browser upgrades.
 
 - **isSfu** — pass through to `addConnection` (default: omit).
 - **scanBrowserGlobals** — walk `window` (slow / risky; default off).
