@@ -28,11 +28,10 @@
       <h1>PeerMetrics SDK - Basic WebRTC</h1>
       <p class="hint">
         This page simulates <strong>two peers in one browser</strong> (two <code>RTCPeerConnection</code>s, two
-        <code>getUserMedia</code> streams). PeerMetrics only monitors <strong>one</strong> of them (the answerer,
-        <code>pc2</code>) so the dashboard shows <strong>two</strong> participants: you and one synthetic remote
-        peer. The other leg exists only to complete the call in-process. For full two-party telemetry, use two browsers
-        or devices. If the peer row still looks empty, the API may not be storing stats for this loopback shape; check
-        network responses for <code>/stats</code> and <code>/connection</code>.
+        <code>getUserMedia</code> streams). PeerMetrics monitors the <strong>local caller leg</strong>
+        (<code>pc1</code>) and treats the other endpoint as a synthetic participant so the current user session has a
+        real peer connection associated with it. The second leg exists only to complete the call in-process. For full
+        two-party telemetry, use two browsers or devices.
       </p>
       <div class="videos">
         <div>
@@ -83,7 +82,7 @@
            * API base URL (must end with /v1). Default in the SDK is https://api.peermetrics.io/v1 (cloud).
            */
           apiRoot: 'http://localhost:8081/v1',
-          apiKey: '1dc7b13966224d53a9b0bf0a04311688',
+          apiKey: '01be2792def441fd834961bc4e5b5bf5',
           userId: 'pending',
           userName: 'pending',
           conferenceId: 'pending',
@@ -175,30 +174,86 @@
 
           const configuration = {}
 
-          pc1 = new RTCPeerConnection(configuration)
-          pc1.addEventListener('icecandidate', e => onIceCandidate(pc1, e))
+          try {
+            pc1 = new RTCPeerConnection(configuration)
+            pc1.addEventListener('icecandidate', e => onIceCandidate(pc1, e))
 
-          pc2 = new RTCPeerConnection(configuration)
-          pc2.addEventListener('icecandidate', e => onIceCandidate(pc2, e))
-          pc2.addEventListener('track', gotRemoteStream)
+            pc2 = new RTCPeerConnection(configuration)
+            pc2.addEventListener('icecandidate', e => onIceCandidate(pc2, e))
+            pc2.addEventListener('track', gotRemoteStream)
 
-          await window.stats.addConnection({
-            pc: pc2,
-            peerId: 'synthetic-remote',
-            peerName: 'Synthetic remote (same tab)'
+            await window.stats.addConnection({
+              pc: pc1,
+              peerId: 'synthetic-remote-participant',
+              peerName: 'Synthetic remote participant (same tab)'
+            })
+
+            localStream.getTracks().forEach(track => pc1.addTrack(track, localStream))
+            remoteStream.getTracks().forEach(track => pc2.addTrack(track, remoteStream))
+
+            const offer = await pc1.createOffer(offerOptions)
+            await pc1.setLocalDescription(offer)
+
+            await pc2.setRemoteDescription(offer)
+            const answer = await pc2.createAnswer()
+
+            await pc2.setLocalDescription(answer)
+            await pc1.setRemoteDescription(answer)
+
+            await waitForConnected(pc1)
+          } catch (e) {
+            console.error(e)
+            await cleanupCall()
+            hangupButton.disabled = true
+            callButton.disabled = false
+            alert(`Call setup failed: ${e.message}`)
+          }
+        }
+
+        function waitForConnected (pc) {
+          if (pc.connectionState === 'connected') return Promise.resolve()
+
+          return new Promise((resolve, reject) => {
+            const timeout = window.setTimeout(() => {
+              cleanup()
+              reject(new Error('Timed out waiting for RTCPeerConnection to connect'))
+            }, 10000)
+
+            function cleanup () {
+              window.clearTimeout(timeout)
+              pc.removeEventListener('connectionstatechange', onConnectionStateChange)
+              pc.removeEventListener('iceconnectionstatechange', onIceConnectionStateChange)
+            }
+
+            function finishIfConnected () {
+              if (pc.connectionState === 'connected' || pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+                cleanup()
+                resolve()
+              }
+            }
+
+            function failIfTerminal () {
+              if (pc.connectionState === 'failed' || pc.connectionState === 'closed' || pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'closed') {
+                cleanup()
+                reject(new Error(`RTCPeerConnection ended before connecting: connectionState=${pc.connectionState}, iceConnectionState=${pc.iceConnectionState}`))
+              }
+            }
+
+            function onConnectionStateChange () {
+              finishIfConnected()
+              failIfTerminal()
+            }
+
+            function onIceConnectionStateChange () {
+              finishIfConnected()
+              failIfTerminal()
+            }
+
+            pc.addEventListener('connectionstatechange', onConnectionStateChange)
+            pc.addEventListener('iceconnectionstatechange', onIceConnectionStateChange)
+            finishIfConnected()
+            failIfTerminal()
           })
-
-          localStream.getTracks().forEach(track => pc1.addTrack(track, localStream))
-          remoteStream.getTracks().forEach(track => pc2.addTrack(track, remoteStream))
-
-          const offer = await pc1.createOffer(offerOptions)
-          await pc1.setLocalDescription(offer)
-
-          await pc2.setRemoteDescription(offer)
-          const answer = await pc2.createAnswer()
-
-          await pc2.setLocalDescription(answer)
-          await pc1.setRemoteDescription(answer)
         }
 
         function gotRemoteStream (e) {
@@ -219,20 +274,33 @@
             return
           }
 
-          let local = pc1.getSenders()
-          for (const rtpSender of local) {
-            if (rtpSender.track) {
-              rtpSender.track.stop()
+          await cleanupCall()
+
+          hangupButton.disabled = true
+          callButton.disabled = false
+        }
+
+        async function cleanupCall () {
+          if (pc1) {
+            let local = pc1.getSenders()
+            for (const rtpSender of local) {
+              if (rtpSender.track) {
+                rtpSender.track.stop()
+              }
             }
+            pc1.close()
           }
-          local = pc2.getSenders()
-          for (const rtpSender of local) {
-            if (rtpSender.track) {
-              rtpSender.track.stop()
+
+          if (pc2) {
+            let local = pc2.getSenders()
+            for (const rtpSender of local) {
+              if (rtpSender.track) {
+                rtpSender.track.stop()
+              }
             }
+            pc2.close()
           }
-          pc1.close()
-          pc2.close()
+
           pc1 = null
           pc2 = null
 
@@ -244,9 +312,6 @@
             }
             peerMetricsSessionActive = false
           }
-
-          hangupButton.disabled = true
-          callButton.disabled = false
         }
       })()
     </script>

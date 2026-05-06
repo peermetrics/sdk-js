@@ -131,6 +131,7 @@
         const MAX_RECONNECTS = 3
         let reconnectCount = 0
         let reconnectingForShard = false
+        let jaasAuthFallbackTried = false
         let lastConferenceFailureWasPolicyBlock = false
         /** @type {any[]} */
         let localTracks = []
@@ -138,7 +139,6 @@
         const remoteTrackMediaElements = new WeakMap()
         /** @type {ReturnType<typeof setTimeout> | null} */
         let joinHangWatchdog = null
-        const EXAMPLE_BUILD_ID = 'jitsi-example-2026-04-11a'
         /** @see jitsi/lib-jitsi-meet JitsiConferenceErrors.MEMBERS_ONLY_ERROR */
         const JITSI_MEMBERS_ONLY_ERROR = 'conference.connectionError.membersOnly'
         const DEFAULT_JITSI_BASE_URL = 'https://meet.jit.si'
@@ -364,7 +364,7 @@
         }
         
         /** Paste Browser API key to send metrics to your PeerMetrics API; leave empty for mock (console only). */
-        const PEERMETRICS_API_KEY = '1dc7b13966224d53a9b0bf0a04311688'
+        const PEERMETRICS_API_KEY = '01be2792def441fd834961bc4e5b5bf5'
         const peermetricsUseMock = !String(PEERMETRICS_API_KEY).trim()
 
         // Initialize PeerMetrics
@@ -484,7 +484,12 @@
             const fullRoomName = buildJitsiRoomName(roomName)
             const appScopedSegment = '/' + encodeURIComponent(appId) + '/'
             const jaasScopedEndpoints = mode === 'jaas' && !!appId && (urls.configUrl.indexOf(appScopedSegment) !== -1 || urls.libUrl.indexOf(appScopedSegment) !== -1)
-            const roomForTransport = jaasScopedEndpoints ? roomName : fullRoomName
+            const jaasVariant = (loadOpts && loadOpts.jaasVariant)
+                ? String(loadOpts.jaasVariant)
+                : (jaasScopedEndpoints ? 'scoped' : 'legacy')
+            const roomForTransport = mode === 'jaas'
+                ? (jaasVariant === 'scoped' ? roomName : fullRoomName)
+                : fullRoomName
             const baseWs = String(deployment.websocket || '')
             if (!baseWs.startsWith('wss://')) {
                 throw new Error('deployment.websocket is not wss://. Check config.js served by ' + urls.base + '.')
@@ -519,6 +524,9 @@
                 if (jaasScopedEndpoints) {
                     log('🧪 JaaS app-scoped endpoints detected; transport room uses leaf: ' + roomForTransport)
                 }
+            }
+            if (mode === 'jaas') {
+                log('🧪 JaaS transport variant: ' + jaasVariant + ' (room=' + roomForTransport + ')')
             }
             if (mode === 'jaas' && urls.base.indexOf('8x8.vc') === -1) {
                 log('⚠️ JaaS mode is selected but base URL is not 8x8.vc. Verify your JaaS endpoint.')
@@ -566,7 +574,7 @@
                 }
             }
             // For JaaS app-scoped endpoints, service URLs already encode tenant/app context.
-            const appIdForConnection = (mode === 'jaas' && !jaasScopedEndpoints) ? appId : null
+            const appIdForConnection = (mode === 'jaas' && jaasVariant === 'legacy') ? appId : null
             const connection = new JitsiMeetJS.JitsiConnection(appIdForConnection, jwtToken || null, connectionOpts)
             currentConnection = connection
 
@@ -696,7 +704,24 @@
                     return
                 }
                 if (error === 'connection.passwordRequired') {
-                    log('💡 Authentication required — expected on public meet.jit.si')
+                    if (mode === 'jaas') {
+                        if (!jaasAuthFallbackTried) {
+                            const nextVariant = jaasVariant === 'scoped' ? 'legacy' : 'scoped'
+                            jaasAuthFallbackTried = true
+                            log('🔄 JaaS auth fallback: retrying once with ' + nextVariant + ' transport scoping.')
+                            statusEl.textContent = 'Status: Retrying JaaS auth…'
+                            try {
+                                try { connection.disconnect() } catch (_) {}
+                                await connectToJitsi(roomName, { forceRefresh: true, jaasVariant: nextVariant })
+                                return
+                            } catch (e) {
+                                log('❌ JaaS fallback failed: ' + (e && e.message ? e.message : e))
+                            }
+                        }
+                        log('💡 JaaS authentication required/rejected. Check JWT validity (exp), appId, and room claim. This is not the public meet.jit.si anonymous-room case.')
+                    } else {
+                        log('💡 Authentication required — expected on public meet.jit.si')
+                    }
                 } else if (error === 'connection.conferenceRequestFailed') {
                     log('💡 conferenceRequestFailed usually means JWT/AppID validation failed (expired token, wrong iss/aud/sub/room claims, or token not issued for this App ID).')
                 } else if (isShardChange && reconnectCount >= MAX_RECONNECTS) {
@@ -884,6 +909,7 @@
                 }
 
                 reconnectCount = 0
+                jaasAuthFallbackTried = false
                 if (mode === 'jaas') {
                     log('🧭 Deployment mode: JaaS (lib-jitsi-meet)')
                 }
@@ -1113,7 +1139,7 @@
             }
             const identity = getParticipantIdentity()
             const urls = getJitsiUrls()
-            log('🚀 Jitsi Meet SDK integration example loaded (' + EXAMPLE_BUILD_ID + ')')
+            log('🚀 Jitsi Meet SDK integration example loaded')
             log('🔧 PeerMetrics: ' + (peermetricsUseMock ? 'mockRequests (set PEERMETRICS_API_KEY to send stats)' : 'sending stats to API'))
             log('🧭 Mode: ' + (deploymentModeEl.value === 'jaas' ? 'B) JaaS' : 'A) Own setup'))
             log('🪪 Local participant: ' + identity.displayName)

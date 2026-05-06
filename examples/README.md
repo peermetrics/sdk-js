@@ -35,7 +35,7 @@ Opening the HTML files directly (`file://`) is not recommended: `getUserMedia` a
 | [`jitsi.html`](jitsi.html) | Jitsi Meet SDK (`lib-jitsi-meet`) + PeerMetrics | **`initPeerMetrics`**: `apiKey`, `mockRequests`, `wrapPeerConnection`. **Room name** in the page input (lowercase, alphanumeric). Jitsi loads `https://meet.jit.si/config.js` in `<head>`; use your own deployment’s `config.js` for production. |
 | [`livekit.html`](livekit.html) | LiveKit client + PeerMetrics | **LiveKit URL and token** in the form (get credentials from [LiveKit Cloud](https://cloud.livekit.io) or your server). **`initPeerMetrics`**: `apiKey`, `mockRequests`, and related identity fields. |
 
-Replace placeholder API keys and endpoints with your PeerMetrics project values before sending real analytics traffic. The Jitsi and LiveKit examples default to `mockRequests: true` so they do not call the API until you change that and supply a valid key.
+Replace placeholder API keys and endpoints with your PeerMetrics project values before sending real analytics traffic. Check each example's `mockRequests` setting and toggle it based on whether you want real API traffic or local dry-run behavior.
 
 ## Watch mode during development
 
